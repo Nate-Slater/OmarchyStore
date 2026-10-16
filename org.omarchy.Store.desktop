@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Omarchy Store
+Comment=Browse and manage community Omarchy plugins
+Exec=omarchy-store
+TryExec=omarchy-store
+Icon=system-software-install-symbolic
+Terminal=false
+Categories=System;
+StartupNotify=true

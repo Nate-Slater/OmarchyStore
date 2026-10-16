@@ -10,13 +10,14 @@ On Arch Linux / Omarchy, install the system UI dependencies if needed:
 sudo pacman -S gtk4 libadwaita python-gobject
 ```
 
-Then run from this checkout:
+Then install it for your user (no root access required):
 
 ```sh
-./omarchy-store
+./install.sh
+omarchy-store
 ```
 
-The launcher runs `app.py` from this checkout; alternatively use `python3 app.py`.
+You can also run it directly from the checkout with `./omarchy-store` or `python3 app.py`.
 
 The catalog can be browsed without Omarchy. Install, enable, remove, and installed-state features use the `omarchy` CLI and require an Omarchy installation.
 
@@ -29,6 +30,8 @@ Marketplace data is untrusted input. The app displays listing fields as GTK text
 Install and enable actions require an explicit confirmation explaining that third-party plugin code will run unsandboxed and that Omarchy installs mutable upstream HEAD, not a commit-bound verified snapshot. Marketplace verification is not a security audit or guarantee. Review plugin source, dependencies, and requested access before proceeding. Monorepos, suites, failed compatibility checks, and unsupported layouts are source-only.
 
 The app does not automatically update installed plugins. Removal delegates to Omarchy and does not delete data a plugin may have stored elsewhere.
+
+Remove the standalone app with `./uninstall.sh`. This removes only its launcher, desktop entry, and two installed program files; it leaves any unexpected files in the app directory untouched.
 
 ## Network and data
 
