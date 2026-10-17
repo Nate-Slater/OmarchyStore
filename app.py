@@ -677,18 +677,8 @@ class StoreWindow(Adw.ApplicationWindow):
         self.recent_section.set_visible(False)
         self.marquee_timer = 0
         self.marquee_paused_by_user = False
-        self.marquee_pointer_inside = False
-        self.marquee_focus_inside = False
         settings = Gtk.Settings.get_default()
         self.animations_enabled = bool(settings.get_property("gtk-enable-animations")) if settings else True
-        motion = Gtk.EventControllerMotion.new()
-        motion.connect("enter", self._marquee_pointer_enter)
-        motion.connect("leave", self._marquee_pointer_leave)
-        self.recent_section.add_controller(motion)
-        focus = Gtk.EventControllerFocus.new()
-        focus.connect("enter", self._marquee_focus_enter)
-        focus.connect("leave", self._marquee_focus_leave)
-        self.recent_section.add_controller(focus)
         content.append(self.recent_section)
 
         warning = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
@@ -1082,8 +1072,6 @@ class StoreWindow(Adw.ApplicationWindow):
     def _scroll_recent(self, _button, direction: int) -> None:
         if not self.recent_section.get_visible():
             return
-        self.marquee_paused_by_user = True
-        self.recent_pause_button.set_label("Play")
         for scroll, track in self.recent_tracks:
             adjustment = scroll.get_hadjustment()
             page_size = adjustment.get_page_size()
@@ -1105,23 +1093,11 @@ class StoreWindow(Adw.ApplicationWindow):
         self.marquee_paused_by_user = not self.marquee_paused_by_user
         self.recent_pause_button.set_label("Play" if self.marquee_paused_by_user else "Pause")
 
-    def _marquee_pointer_enter(self, _controller, _x, _y) -> None:
-        self.marquee_pointer_inside = True
-
-    def _marquee_pointer_leave(self, _controller) -> None:
-        self.marquee_pointer_inside = False
-
-    def _marquee_focus_enter(self, _controller) -> None:
-        self.marquee_focus_inside = True
-
-    def _marquee_focus_leave(self, _controller) -> None:
-        self.marquee_focus_inside = False
-
     def _animate_recent(self) -> bool:
         now = time.monotonic()
         delta = min(0.1, max(0.0, now - self.marquee_last_tick))
         self.marquee_last_tick = now
-        if self.marquee_paused_by_user or self.marquee_pointer_inside or self.marquee_focus_inside:
+        if self.marquee_paused_by_user:
             return GLib.SOURCE_CONTINUE
         for index, row in enumerate(self.marquee_rows):
             adjustment = row["scroll"].get_hadjustment()

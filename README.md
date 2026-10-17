@@ -1,6 +1,6 @@
 # Omarchy Store
 
-Omarchy Store is a standalone GTK 4 / libadwaita desktop application for browsing the [Omarchy Plugin Marketplace](https://plugins.omarchy.org/). Colors, accents, and the hero artwork come from the active Omarchy theme and update live when that theme changes. **Discover** shows **Hidden Gems** and the animated two-row **Just Landed** feed. **Browse** is the full catalog: search, category and install-state filters, sorting, and plugin details.
+Omarchy Store is a standalone GTK 4 / libadwaita desktop application for browsing the [Omarchy Plugin Marketplace](https://plugins.omarchy.org/). Colors, accents, and the hero artwork come from the active Omarchy theme and update live when that theme changes. **Discover** shows **Hidden Gems** and the animated two-row **Just Landed** feed, which keeps moving under the pointer; pause it explicitly with the Pause button. **Browse** is the full catalog: search, category and install-state filters, sorting, and plugin details.
 
 ## Run
 
