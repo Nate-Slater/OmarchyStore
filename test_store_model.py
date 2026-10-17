@@ -115,6 +115,12 @@ class StoreModelTests(unittest.TestCase):
         ]})
         now = datetime(2026, 10, 17, 12, 0, tzinfo=timezone.utc)
         self.assertEqual([item.id for item in recently_added(items, now=now)], ["fresh.one"])
+        pictured, _ = normalize_catalog({"plugins": [plugin(
+            previewThumbnail="assets/img/plugins/card.webp",
+            previewImage="assets/img/plugins/detail.webp",
+        )]})
+        self.assertTrue(pictured[0].preview_url.endswith("/card.webp"))
+        self.assertTrue(pictured[0].full_preview_url.endswith("/detail.webp"))
 
     def test_hidden_gems_use_verified_low_view_install_rates(self):
         catalog, _ = normalize_catalog({"plugins": [

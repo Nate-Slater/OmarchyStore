@@ -155,15 +155,16 @@ class PluginItem(GObject.Object):
 
 
 class PreviewArt(Gtk.Overlay):
-    def __init__(self, height: int):
+    def __init__(self, height: int, *, full: bool = False):
         super().__init__()
         self.image_url = ""
         self.generation = 0
+        self.full = full
         self.add_css_class("preview-frame")
         self.set_size_request(-1, height)
         self.picture = Gtk.Picture()
         self.picture.set_can_shrink(True)
-        self.picture.set_content_fit(Gtk.ContentFit.COVER)
+        self.picture.set_content_fit(Gtk.ContentFit.CONTAIN if full else Gtk.ContentFit.COVER)
         self.picture.add_css_class("preview-image")
         self.set_child(self.picture)
 
@@ -181,24 +182,73 @@ class PreviewArt(Gtk.Overlay):
 
     def load(self, plugin: Plugin, request_image) -> None:
         self.generation += 1
-        self.image_url = plugin.preview_url
+        self.image_url = plugin.full_preview_url if self.full and plugin.full_preview_url else plugin.preview_url
         for accent in ("lime", "violet", "amber", "cyan", "coral", "blue", "mint", "rose"):
             self.mark.remove_css_class(f"accent-{accent}")
         self.mark.add_css_class(f"accent-{plugin.accent}")
         self.mark.set_text(plugin.initials)
-        self.set_measure_overlay(self.placeholder, True)
+        if not self.full:
+            self.set_measure_overlay(self.placeholder, True)
         self.picture.set_paintable(None)
+        self.picture.set_hexpand(True)
+        self.picture.set_vexpand(True)
         self.placeholder.set_visible(True)
         if self.image_url:
             request_image(self.image_url, self, self.generation)
 
     def set_texture(self, url: str, generation: int, texture) -> None:
-        if self.image_url != url or self.generation != generation:
-            return
-        if texture is None:
+        if self.image_url != url or self.generation != generation or texture is None:
             return
         self.picture.set_paintable(texture)
         self.placeholder.set_visible(False)
+        if self.full:
+            width = max(1, texture.get_width())
+            height = max(1, texture.get_height())
+            scale = min(920 / width, 640 / height)
+            self.set_size_request(max(320, int(width * scale)), max(180, int(height * scale)))
+
+
+class FullPreview(Gtk.Picture):
+    """Shows a marketplace screenshot whole, without cropping it to the card frame."""
+
+    def __init__(self):
+        super().__init__()
+        self.image_url = ""
+        self.thumb_url = ""
+        self.full_loaded = False
+        self.generation = 0
+        self.add_css_class("preview-frame")
+        self.set_can_shrink(True)
+        self.set_hexpand(True)
+        self.set_content_fit(Gtk.ContentFit.CONTAIN)
+        self.set_size_request(880, 495)
+
+    def load(self, plugin: Plugin, request_image) -> None:
+        self.generation += 1
+        self.full_loaded = False
+        self.thumb_url = plugin.preview_url
+        self.image_url = plugin.full_preview_url or plugin.preview_url
+        self.set_paintable(None)
+        if self.thumb_url:
+            request_image(self.thumb_url, self, self.generation)
+        if self.image_url and self.image_url != self.thumb_url:
+            request_image(self.image_url, self, self.generation)
+
+    def set_texture(self, url: str, generation: int, texture) -> None:
+        if generation != self.generation or texture is None:
+            return
+        if url not in {self.image_url, self.thumb_url}:
+            return
+        if self.full_loaded and url != self.image_url:
+            return
+        width = max(1, texture.get_width())
+        height = max(1, texture.get_height())
+        scale = min(880 / width, 520 / height)
+        self.set_size_request(max(480, int(width * scale)), max(270, int(height * scale)))
+        self.set_paintable(texture)
+        self.queue_draw()
+        if url == self.image_url:
+            self.full_loaded = True
 
 
 class PluginCard(Gtk.Box):
@@ -833,11 +883,12 @@ class StoreWindow(Adw.ApplicationWindow):
         browse.append(list_column)
 
         self.preview_plugin: Plugin | None = None
+        self.preview_art = None
         self.preview_return_view: str | None = None
         self.preview_dialog = Adw.Dialog(title="Plugin preview")
         self.preview_dialog.set_presentation_mode(Adw.DialogPresentationMode.FLOATING)
-        self.preview_dialog.set_content_width(860)
-        self.preview_dialog.set_content_height(520)
+        self.preview_dialog.set_content_width(980)
+        self.preview_dialog.set_content_height(760)
         self.preview_dialog.add_css_class("preview-dialog")
         self.preview_dialog.connect("closed", self._preview_closed)
         self.details = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
@@ -1120,7 +1171,10 @@ class StoreWindow(Adw.ApplicationWindow):
             return
         self.pending_previews.setdefault(url, []).append((weakref.ref(preview), generation))
         if len(self.pending_previews[url]) == 1:
-            self.image_pool.submit(self._download_preview, url)
+            if isinstance(preview, FullPreview):
+                threading.Thread(target=self._download_preview, args=(url,), daemon=True).start()
+            else:
+                self.image_pool.submit(self._download_preview, url)
 
     def _download_preview(self, url: str) -> None:
         try:
@@ -1149,7 +1203,7 @@ class StoreWindow(Adw.ApplicationWindow):
         if data:
             try:
                 texture = Gdk.Texture.new_from_bytes(GLib.Bytes.new(data))
-                if texture.get_width() > 1600 or texture.get_height() > 1200:
+                if texture.get_width() > 4096 or texture.get_height() > 4096:
                     texture = None
             except GLib.Error:
                 texture = None
@@ -1453,17 +1507,13 @@ class StoreWindow(Adw.ApplicationWindow):
             ))
             return
 
-        preview_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
-        artwork = PreviewArt(240)
-        artwork.set_size_request(360, 240)
-        artwork.set_hexpand(False)
-        preview_row.append(artwork)
+        artwork = FullPreview()
+        self.preview_art = artwork
+        self.details.append(artwork)
+        artwork.load(plugin, self.request_preview)
         summary = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         summary.set_hexpand(True)
-        summary.set_valign(Gtk.Align.START)
-        preview_row.append(summary)
-        self.details.append(preview_row)
-        artwork.load(plugin, self.request_preview)
+        self.details.append(summary)
 
         badges = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         badges.set_margin_top(4)

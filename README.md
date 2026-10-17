@@ -19,7 +19,7 @@ omarchy-store
 
 You can also run it directly from the checkout with `./omarchy-store` or `python3 app.py`.
 
-Discover scrolls through the feeds. Clicking a plugin there opens its preview and returns to Discover when the preview closes. Browse fills the page with plugins. Click a card to open its preview, with artwork and the install action. Press Ctrl+K to jump to search. The catalog can be browsed without Omarchy; install, enable, remove, and installed-state features use the `omarchy` CLI and require an Omarchy installation.
+Discover scrolls through the feeds. Clicking a plugin there opens its preview, showing the full marketplace screenshot when one is provided, and returns to Discover when the preview closes. Browse fills the page with plugins. Click a card to open its preview, with artwork and the install action. Press Ctrl+K to jump to search. The catalog can be browsed without Omarchy; install, enable, remove, and installed-state features use the `omarchy` CLI and require an Omarchy installation.
 
 ## Security
 

@@ -50,6 +50,7 @@ class Plugin:
     verification_coverage: str
     verification_method: str
     preview_url: str
+    full_preview_url: str
     listed_at: str
     install_note: str
     upstream_status: str
@@ -150,6 +151,7 @@ def normalize_plugin(raw: Any) -> Plugin | None:
         verification_coverage=safe_text(raw.get("verificationCoverage"), 40),
         verification_method=safe_text(raw.get("verificationMethod"), 60),
         preview_url=marketplace_preview_url(raw.get("previewThumbnail") or raw.get("previewImage")),
+        full_preview_url=marketplace_preview_url(raw.get("previewImage") or raw.get("previewThumbnail")),
         listed_at=safe_text(raw.get("listedAt"), 40),
         install_note=safe_text(raw.get("installNote"), 500),
         upstream_status=upstream_status,
