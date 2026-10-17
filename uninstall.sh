@@ -13,6 +13,10 @@ fi
 
 rm -f -- "$LAUNCHER" "$DESKTOP_FILE"
 rm -f -- "$APP_DIR/app.py" "$APP_DIR/store_model.py"
+if [ -d "$APP_DIR/__pycache__" ] && [ ! -L "$APP_DIR/__pycache__" ]; then
+  rm -f -- "$APP_DIR/__pycache__"/app.*.pyc "$APP_DIR/__pycache__"/store_model.*.pyc
+  rmdir -- "$APP_DIR/__pycache__" 2>/dev/null || true
+fi
 if [ -d "$APP_DIR" ]; then
   rmdir -- "$APP_DIR" 2>/dev/null || {
     printf 'Left non-empty application data directory untouched: %s\n' "$APP_DIR" >&2

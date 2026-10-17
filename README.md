@@ -31,11 +31,11 @@ Install and enable actions require an explicit confirmation explaining that thir
 
 The app does not automatically update installed plugins. Removal delegates to Omarchy and does not delete data a plugin may have stored elsewhere.
 
-Remove the standalone app with `./uninstall.sh`. This removes only its launcher, desktop entry, and two installed program files; it leaves any unexpected files in the app directory untouched.
+Remove the standalone app with `./uninstall.sh`. This removes its launcher, desktop entry, program files, and generated Python bytecode; it leaves any unexpected files in the app directory untouched.
 
 ## Network and data
 
-The app fetches the public `https://plugins.omarchy.org/catalog.json` over HTTPS. It loads no remote images or scripts and sends no telemetry. It stores no catalog cache or user data. Repository links open in the system browser only after GitHub URL validation.
+The app fetches the public `https://plugins.omarchy.org/catalog.json` over HTTPS and loads listing thumbnails only from that marketplace's validated `assets/img/plugins/` image path. Image downloads are size-limited, redirect-free, and cached in memory; arbitrary hosts and scripts are never loaded. These requests disclose normal network metadata to the marketplace host. The app sends no telemetry and stores no catalog cache or user data. Repository links open in the system browser only after GitHub URL validation.
 
 ## Development checks
 

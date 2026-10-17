@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 import json
 import re
 from typing import Any
@@ -22,6 +23,11 @@ _GITHUB_REPO = re.compile(
 _CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _ACCENTS = {"lime", "violet", "amber", "cyan", "coral", "blue", "mint", "rose"}
 _INITIALS = re.compile(r"^[A-Z0-9]{1,3}$")
+_PREVIEW_PATH = re.compile(
+    r"^assets/img/plugins/(?:[A-Za-z0-9][A-Za-z0-9._-]*/)*"
+    r"[A-Za-z0-9][A-Za-z0-9._-]*\.(?:webp|png|jpe?g)$",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -41,6 +47,8 @@ class Plugin:
     verification_status: str
     verification_coverage: str
     verification_method: str
+    preview_url: str
+    listed_at: str
     install_note: str
     upstream_status: str
     install_available: bool
@@ -83,6 +91,13 @@ def github_repository(value: Any) -> str:
     if ".." in repository:
         return ""
     return f"https://github.com/{owner}/{repository.removesuffix('.git')}.git"
+
+
+def marketplace_preview_url(value: Any) -> str:
+    """Allow only static image assets under the marketplace's image directory."""
+    if not isinstance(value, str) or not _PREVIEW_PATH.fullmatch(value) or ".." in value:
+        return ""
+    return "https://plugins.omarchy.org/" + value
 
 
 def normalize_plugin(raw: Any) -> Plugin | None:
@@ -132,6 +147,8 @@ def normalize_plugin(raw: Any) -> Plugin | None:
         verification_status=safe_text(raw.get("verificationStatus"), 40) or "unverified",
         verification_coverage=safe_text(raw.get("verificationCoverage"), 40),
         verification_method=safe_text(raw.get("verificationMethod"), 60),
+        preview_url=marketplace_preview_url(raw.get("previewThumbnail") or raw.get("previewImage")),
+        listed_at=safe_text(raw.get("listedAt"), 40),
         install_note=safe_text(raw.get("installNote"), 500),
         upstream_status=upstream_status,
         install_available=install_available,
@@ -155,6 +172,52 @@ def normalize_catalog(data: Any) -> tuple[list[Plugin], str]:
         plugins.append(plugin)
     plugins.sort(key=lambda item: (not item.install_available, item.name.casefold()))
     return plugins, safe_text(data.get("generatedAt"), 40)
+
+
+def listing_time(plugin: Plugin) -> datetime | None:
+    try:
+        value = plugin.listed_at
+        parsed = datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value)
+        return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def recently_added(
+    plugins: list[Plugin], *, hours: int = 24, now: datetime | None = None
+) -> list[Plugin]:
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    current = current.astimezone(timezone.utc)
+    cutoff = current - timedelta(hours=max(1, hours))
+    result = [
+        (listing_time(plugin), plugin)
+        for plugin in plugins
+    ]
+    return [
+        plugin for timestamp, plugin in sorted(
+            (pair for pair in result if pair[0] is not None and cutoff <= pair[0] <= current),
+            key=lambda pair: pair[0],
+            reverse=True,
+        )
+    ]
+
+
+def listing_age(plugin: Plugin, *, now: datetime | None = None) -> str:
+    timestamp = listing_time(plugin)
+    if timestamp is None:
+        return "RECENTLY ADDED"
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    minutes = max(0, int((current.astimezone(timezone.utc) - timestamp).total_seconds() // 60))
+    if minutes < 1:
+        return "JUST NOW"
+    if minutes < 60:
+        return f"{minutes}M AGO"
+    hours = minutes // 60
+    return f"{hours}H AGO" if hours < 24 else f"{hours // 24}D AGO"
 
 
 def parse_catalog(raw: bytes) -> tuple[list[Plugin], str]:

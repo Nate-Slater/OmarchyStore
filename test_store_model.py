@@ -1,5 +1,6 @@
 import json
 import unittest
+from datetime import datetime, timezone
 
 from store_model import (
     CatalogError,
@@ -9,7 +10,9 @@ from store_model import (
     install_args,
     installed_map,
     normalize_catalog,
+    marketplace_preview_url,
     parse_catalog,
+    recently_added,
     remove_args,
     search_plugins,
 )
@@ -84,6 +87,26 @@ class StoreModelTests(unittest.TestCase):
         self.assertEqual(items[0].initials, "TC")
         self.assertEqual(items[0].accent, "coral")
         self.assertEqual(items[0].stars, 12)
+
+    def test_preview_images_are_fixed_host_assets_and_recent_feed_is_time_bounded(self):
+        self.assertEqual(
+            marketplace_preview_url("assets/img/plugins/demo-card.webp"),
+            "https://plugins.omarchy.org/assets/img/plugins/demo-card.webp",
+        )
+        for unsafe in (
+            "https://evil.example/image.webp",
+            "assets/img/plugins/../../secret.webp",
+            "assets/img/plugins/demo.svg",
+        ):
+            with self.subTest(path=unsafe):
+                self.assertEqual(marketplace_preview_url(unsafe), "")
+
+        items, _ = normalize_catalog({"plugins": [
+            plugin(id="fresh.one", listedAt="2026-10-17T11:30:00Z"),
+            plugin(id="fresh.two", listedAt="2026-10-16T08:00:00Z"),
+        ]})
+        now = datetime(2026, 10, 17, 12, 0, tzinfo=timezone.utc)
+        self.assertEqual([item.id for item in recently_added(items, now=now)], ["fresh.one"])
 
     def test_marketplace_install_commands_are_ignored(self):
         items, _ = normalize_catalog({"plugins": [plugin(

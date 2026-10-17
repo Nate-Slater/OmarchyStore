@@ -3,12 +3,16 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 import shutil
 import subprocess
 import sys
 import threading
+import urllib.parse
 import urllib.error
 import urllib.request
+import weakref
 
 import gi
 
@@ -25,7 +29,10 @@ from store_model import (
     github_repository,
     install_args,
     installed_map,
+    listing_age,
+    marketplace_preview_url,
     parse_catalog,
+    recently_added,
     remove_args,
     search_plugins,
 )
@@ -37,6 +44,16 @@ SECURITY_NOTICE = (
     "repository's current GitHub HEAD, not a verified commit. Review source "
     "and dependencies before installing."
 )
+MAX_PREVIEW_BYTES = 2 * 1024 * 1024
+MAX_CACHED_PREVIEWS = 40
+
+
+class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, file_pointer, code, message, headers, new_url):
+        return None
+
+
+NO_REDIRECT_OPENER = urllib.request.build_opener(NoRedirectHandler())
 
 APP_CSS = """
 window.store-window, .store-root { background: #000; color: #d7d7d9; }
@@ -67,6 +84,19 @@ gridview > child:selected { background: transparent; }
 .plugin-card:hover { background: #101012; border-color: #4a4a50; }
 .plugin-card.selected { background: #111012; border-color: #ff5a36; }
 .plugin-mark { min-width: 42px; min-height: 42px; border: 1px solid #28282c; border-radius: 6px; background: #151416; font-family: monospace; font-size: 12px; font-weight: 800; }
+.preview-frame { min-height: 98px; border: 1px solid #28282c; border-radius: 6px; background: #101012; }
+.preview-placeholder { min-height: 98px; background: linear-gradient(135deg, #151416, #0b0b0d); }
+.preview-placeholder label { font-family: monospace; font-size: 24px; font-weight: 800; }
+.preview-image { min-height: 98px; }
+.recent-section { background: transparent; }
+.recent-heading { color: #aaaab0; font-family: monospace; font-size: 10px; font-weight: 800; letter-spacing: 1px; }
+.recent-summary { color: #7d7d84; font-family: monospace; font-size: 9px; }
+button.carousel-arrow { min-width: 30px; min-height: 28px; border: 1px solid #28282c; border-radius: 5px; background: #0b0b0d; color: #aaaab0; }
+button.carousel-arrow:hover { border-color: #ff5a36; color: #ff5a36; }
+button.recent-card { min-width: 218px; border: 1px solid #28282c; border-radius: 7px; background: #0b0b0d; padding: 8px; }
+button.recent-card:hover { border-color: #ff5a36; background: #101012; }
+button.recent-card label.recent-name { color: #eee; font-size: 11px; font-weight: 750; }
+button.recent-card label.recent-byline { color: #7d7d84; font-family: monospace; font-size: 8px; }
 .plugin-title { color: #eee; font-size: 14px; font-weight: 750; }
 .plugin-author { color: #7d7d84; font-family: monospace; font-size: 9px; }
 .plugin-description { color: #aaaab0; font-size: 11px; }
@@ -114,11 +144,61 @@ class PluginItem(GObject.Object):
         self.plugin = plugin
 
 
+class PreviewArt(Gtk.Overlay):
+    def __init__(self, height: int):
+        super().__init__()
+        self.image_url = ""
+        self.generation = 0
+        self.add_css_class("preview-frame")
+        self.set_size_request(-1, height)
+        self.picture = Gtk.Picture()
+        self.picture.set_can_shrink(True)
+        self.picture.set_content_fit(Gtk.ContentFit.COVER)
+        self.picture.add_css_class("preview-image")
+        self.set_child(self.picture)
+
+        self.placeholder = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        self.placeholder.set_halign(Gtk.Align.FILL)
+        self.placeholder.set_valign(Gtk.Align.FILL)
+        self.placeholder.set_hexpand(True)
+        self.placeholder.set_vexpand(True)
+        self.placeholder.set_homogeneous(True)
+        self.placeholder.add_css_class("preview-placeholder")
+        self.mark = Gtk.Label()
+        self.mark.add_css_class("accent-coral")
+        self.placeholder.append(self.mark)
+        self.add_overlay(self.placeholder)
+
+    def load(self, plugin: Plugin, request_image) -> None:
+        self.generation += 1
+        self.image_url = plugin.preview_url
+        for accent in ("lime", "violet", "amber", "cyan", "coral", "blue", "mint", "rose"):
+            self.mark.remove_css_class(f"accent-{accent}")
+        self.mark.add_css_class(f"accent-{plugin.accent}")
+        self.mark.set_text(plugin.initials)
+        self.set_measure_overlay(self.placeholder, True)
+        self.picture.set_paintable(None)
+        self.placeholder.set_visible(True)
+        if self.image_url:
+            request_image(self.image_url, self, self.generation)
+
+    def set_texture(self, url: str, generation: int, texture) -> None:
+        if self.image_url != url or self.generation != generation:
+            return
+        if texture is None:
+            return
+        self.picture.set_paintable(texture)
+        self.placeholder.set_visible(False)
+
+
 class PluginCard(Gtk.Box):
     def __init__(self, window):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         self.window = window
         self.add_css_class("plugin-card")
+
+        self.preview = PreviewArt(98)
+        self.append(self.preview)
 
         head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         self.mark = Gtk.Label()
@@ -187,12 +267,36 @@ class PluginCard(Gtk.Box):
         tag = plugin.tags[0].upper() if plugin.tags else plugin.kind.upper()
         self.footer.set_text(f"{stars}{tag or 'COMMUNITY PLUGIN'}")
         self.set_selected(selected)
+        self.preview.load(plugin, self.window.request_preview)
 
     def set_selected(self, selected: bool) -> None:
         if selected:
             self.add_css_class("selected")
         else:
             self.remove_css_class("selected")
+
+
+class RecentPluginCard(Gtk.Button):
+    def __init__(self, window, plugin: Plugin):
+        super().__init__()
+        self.add_css_class("recent-card")
+        self.set_size_request(218, -1)
+        self.connect("clicked", window._select_recent_plugin, plugin)
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=7)
+        self.preview = PreviewArt(104)
+        content.append(self.preview)
+        self.name = Gtk.Label(label=plugin.name)
+        self.name.set_xalign(0)
+        self.name.set_ellipsize(Pango.EllipsizeMode.END)
+        self.name.add_css_class("recent-name")
+        content.append(self.name)
+        self.byline = Gtk.Label(label=f"{plugin.author}  ·  {listing_age(plugin)}")
+        self.byline.set_xalign(0)
+        self.byline.set_ellipsize(Pango.EllipsizeMode.END)
+        self.byline.add_css_class("recent-byline")
+        content.append(self.byline)
+        self.set_child(content)
+        self.preview.load(plugin, window.request_preview)
 
 
 def fetch_catalog() -> tuple[list[Plugin], str]:
@@ -202,7 +306,7 @@ def fetch_catalog() -> tuple[list[Plugin], str]:
         method="GET",
     )
     try:
-        with urllib.request.urlopen(request, timeout=25) as response:
+        with NO_REDIRECT_OPENER.open(request, timeout=25) as response:
             if response.geturl() != CATALOG_URL:
                 raise CatalogError("Marketplace redirected away from its catalog URL")
             raw = response.read(MAX_CATALOG_BYTES + 1)
@@ -229,6 +333,9 @@ class StoreWindow(Adw.ApplicationWindow):
         self.busy = False
         self.filter_mode = "all"
         self.category = ""
+        self.preview_cache = OrderedDict()
+        self.pending_previews = {}
+        self.image_pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="omarchy-store-image")
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         root.add_css_class("store-root")
@@ -303,6 +410,41 @@ class StoreWindow(Adw.ApplicationWindow):
         hero_count.append(hero_count_caption)
         hero.append(hero_count)
         content.append(hero)
+
+        self.recent_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self.recent_section.add_css_class("recent-section")
+        recent_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        recent_title = Gtk.Label(label="JUST LANDED")
+        recent_title.set_xalign(0)
+        recent_title.add_css_class("recent-heading")
+        recent_header.append(recent_title)
+        self.recent_summary = Gtk.Label(label="")
+        self.recent_summary.set_xalign(0)
+        self.recent_summary.add_css_class("recent-summary")
+        recent_header.append(self.recent_summary)
+        recent_spacer = Gtk.Box()
+        recent_spacer.set_hexpand(True)
+        recent_header.append(recent_spacer)
+        self.recent_back = Gtk.Button(label="‹")
+        self.recent_back.add_css_class("carousel-arrow")
+        self.recent_back.set_tooltip_text("Previous recently added plugins")
+        self.recent_back.connect("clicked", self._scroll_recent, -1)
+        recent_header.append(self.recent_back)
+        self.recent_forward = Gtk.Button(label="›")
+        self.recent_forward.add_css_class("carousel-arrow")
+        self.recent_forward.set_tooltip_text("Next recently added plugins")
+        self.recent_forward.connect("clicked", self._scroll_recent, 1)
+        recent_header.append(self.recent_forward)
+        self.recent_section.append(recent_header)
+
+        self.recent_cards = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        self.recent_scroll = Gtk.ScrolledWindow()
+        self.recent_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+        self.recent_scroll.set_min_content_height(174)
+        self.recent_scroll.set_child(self.recent_cards)
+        self.recent_section.append(self.recent_scroll)
+        self.recent_section.set_visible(False)
+        content.append(self.recent_section)
 
         warning = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         warning.add_css_class("security-strip")
@@ -402,6 +544,7 @@ class StoreWindow(Adw.ApplicationWindow):
         panes.set_vexpand(True)
         content.append(panes)
 
+        self.connect("close-request", self._on_close_request)
         self._refresh(None)
 
     def _refresh(self, _button) -> None:
@@ -440,11 +583,106 @@ class StoreWindow(Adw.ApplicationWindow):
         ]))
         self.category = ""
         self._rebuild_store()
+        self._populate_recent()
         suffix = f" · catalog updated {generated_at[:10]}" if generated_at else ""
         self.status.set_text(f"COMMUNITY REGISTRY{suffix}")
         self.hero_total.set_text(f"{len(self.plugins):,}")
         self._update_result_count()
         return GLib.SOURCE_REMOVE
+
+    def _populate_recent(self) -> None:
+        self._clear_box(self.recent_cards)
+        fresh = recently_added(self.plugins, hours=24)
+        week = recently_added(self.plugins, hours=24 * 7)
+        carousel = fresh if fresh else week
+        self.recent_section.set_visible(bool(carousel))
+        if not carousel:
+            return
+        self.recent_summary.set_text(
+            f"{len(fresh)} NEW IN 24H  ·  {len(week)} IN 7 DAYS"
+            if fresh else f"NO NEW LISTINGS TODAY  ·  {len(week)} IN 7 DAYS"
+        )
+        for plugin in carousel[:12]:
+            self.recent_cards.append(RecentPluginCard(self, plugin))
+
+    def _scroll_recent(self, _button, direction: int) -> None:
+        adjustment = self.recent_scroll.get_hadjustment()
+        step = max(220, adjustment.get_page_size() * 0.75)
+        target = adjustment.get_value() + direction * step
+        maximum = max(0, adjustment.get_upper() - adjustment.get_page_size())
+        adjustment.set_value(max(0, min(maximum, target)))
+
+    def _select_recent_plugin(self, _button, plugin: Plugin) -> None:
+        self.filter_buttons["all"].set_active(True)
+        self.filter_mode = "all"
+        self.search.set_text("")
+        self.category_filter.set_selected(0)
+        self.category = ""
+        self.custom_filter.changed(Gtk.FilterChange.DIFFERENT)
+        self._update_result_count()
+        for position in range(self.filtered_store.get_n_items()):
+            item = self.filtered_store.get_item(position)
+            if item.plugin.id == plugin.id:
+                self.selection.set_selected(position)
+                self.grid_view.scroll_to(position, Gtk.ListScrollFlags.FOCUS)
+                break
+
+    def request_preview(self, url: str, preview: PreviewArt, generation: int) -> None:
+        if not url or marketplace_preview_url(urllib.parse.urlsplit(url).path.lstrip("/")) != url:
+            return
+        if url in self.preview_cache:
+            texture = self.preview_cache[url]
+            self.preview_cache.move_to_end(url)
+            preview.set_texture(url, generation, texture or None)
+            return
+        self.pending_previews.setdefault(url, []).append((weakref.ref(preview), generation))
+        if len(self.pending_previews[url]) == 1:
+            self.image_pool.submit(self._download_preview, url)
+
+    def _download_preview(self, url: str) -> None:
+        try:
+            parsed = urllib.parse.urlsplit(url)
+            if parsed.scheme != "https" or parsed.hostname != "plugins.omarchy.org" or parsed.port:
+                raise ValueError("image URL is outside the marketplace asset origin")
+            request = urllib.request.Request(
+                url,
+                headers={"Accept": "image/webp,image/png,image/jpeg", "User-Agent": "OmarchyStore/1.0"},
+                method="GET",
+            )
+            with NO_REDIRECT_OPENER.open(request, timeout=12) as response:
+                if response.geturl() != url:
+                    raise ValueError("image request redirected")
+                if response.headers.get_content_type() not in {"image/webp", "image/png", "image/jpeg"}:
+                    raise ValueError("unsupported image type")
+                data = response.read(MAX_PREVIEW_BYTES + 1)
+            if len(data) > MAX_PREVIEW_BYTES:
+                raise ValueError("image exceeded the size limit")
+        except Exception:
+            data = None
+        GLib.idle_add(self._preview_loaded, url, data)
+
+    def _preview_loaded(self, url: str, data: bytes | None) -> bool:
+        texture = None
+        if data:
+            try:
+                texture = Gdk.Texture.new_from_bytes(GLib.Bytes.new(data))
+                if texture.get_width() > 1600 or texture.get_height() > 1200:
+                    texture = None
+            except GLib.Error:
+                texture = None
+        self.preview_cache[url] = texture or False
+        self.preview_cache.move_to_end(url)
+        while len(self.preview_cache) > MAX_CACHED_PREVIEWS:
+            self.preview_cache.popitem(last=False)
+        for preview_ref, generation in self.pending_previews.pop(url, []):
+            preview = preview_ref()
+            if preview is not None:
+                preview.set_texture(url, generation, texture)
+        return GLib.SOURCE_REMOVE
+
+    def _on_close_request(self, _window) -> bool:
+        self.image_pool.shutdown(wait=False, cancel_futures=True)
+        return False
 
     def _installed_worker(self) -> None:
         try:
