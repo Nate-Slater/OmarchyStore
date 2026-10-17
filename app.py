@@ -60,7 +60,7 @@ SECURITY_NOTICE = (
     "and dependencies before installing."
 )
 MAX_PREVIEW_BYTES = 2 * 1024 * 1024
-PAGE_SIZE = 4
+PAGE_SIZE = 8
 MAX_CACHED_PREVIEWS = 40
 ENGAGEMENT_URL = "https://api.omarchyplugins.com/v1/stats"
 
@@ -206,6 +206,8 @@ class PluginCard(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         self.window = window
         self.add_css_class("plugin-card")
+        self.set_tooltip_text("Open preview")
+        self.set_cursor_from_name("pointer")
 
         self.preview = PreviewArt(98)
         self.append(self.preview)
@@ -750,16 +752,15 @@ class StoreWindow(Adw.ApplicationWindow):
         self.filtered_store = Gtk.FilterListModel.new(self.store, self.custom_filter)
         self.selection = Gtk.SingleSelection.new(self.filtered_store)
         self.selection.set_autoselect(True)
-        self.selection.connect("notify::selected-item", self._selection_changed)
-
         factory = Gtk.SignalListItemFactory()
         factory.connect("setup", self._setup_card)
         factory.connect("bind", self._bind_card)
         self.grid_view = Gtk.GridView.new(self.selection, factory)
-        self.grid_view.set_min_columns(1)
-        self.grid_view.set_max_columns(2)
-        self.grid_view.set_single_click_activate(False)
+        self.grid_view.set_min_columns(2)
+        self.grid_view.set_max_columns(4)
+        self.grid_view.set_single_click_activate(True)
         self.grid_view.set_vexpand(True)
+        self.grid_view.connect("activate", self._card_activated)
 
         list_scroll = Gtk.ScrolledWindow()
         list_scroll.add_css_class("catalog-scroll")
@@ -777,7 +778,7 @@ class StoreWindow(Adw.ApplicationWindow):
         empty_title.set_xalign(0)
         empty_title.add_css_class("detail-title")
         self.empty_state.append(empty_title)
-        empty_copy = Gtk.Label(label="Try another name, tag, or author, or clear the current filters.")
+        empty_copy = Gtk.Label(label="Try another name, tag, or author, or clear the current filters. Click a plugin to preview it.")
         empty_copy.set_xalign(0)
         empty_copy.set_wrap(True)
         empty_copy.add_css_class("detail-info")
@@ -826,30 +827,42 @@ class StoreWindow(Adw.ApplicationWindow):
         pager.append(self.page_last)
 
         list_column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        list_column.set_vexpand(True)
         list_column.append(catalog_stack)
         list_column.append(pager)
+        browse.append(list_column)
 
-        self.details = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        self.preview_plugin: Plugin | None = None
+        self.preview_dialog = Adw.Dialog(title="Plugin preview")
+        self.preview_dialog.set_presentation_mode(Adw.DialogPresentationMode.FLOATING)
+        self.preview_dialog.set_content_width(860)
+        self.preview_dialog.set_content_height(520)
+        self.preview_dialog.add_css_class("preview-dialog")
+        self.details = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         self.details.add_css_class("details-panel")
-        self.details.set_margin_top(18)
-        self.details.set_margin_bottom(18)
-        self.details.set_margin_start(20)
-        self.details.set_margin_end(20)
+        self.details.set_margin_top(4)
+        self.details.set_margin_bottom(16)
+        self.details.set_margin_start(16)
+        self.details.set_margin_end(16)
         detail_scroll = Gtk.ScrolledWindow()
         detail_scroll.add_css_class("detail-scroll")
         detail_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        detail_scroll.set_vexpand(True)
         detail_scroll.set_child(self.details)
-        detail_scroll.set_size_request(380, -1)
-
-        panes = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
-        panes.set_wide_handle(True)
-        panes.set_start_child(list_column)
-        panes.set_end_child(detail_scroll)
-        panes.set_resize_start_child(True)
-        panes.set_shrink_start_child(True)
-        panes.set_shrink_end_child(False)
-        panes.set_vexpand(True)
-        browse.append(panes)
+        sheet = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        close_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        close_row.set_margin_top(10)
+        close_row.set_margin_end(12)
+        close_row.set_margin_start(16)
+        close = Gtk.Button(label="Close")
+        close.add_css_class("source-button")
+        close.set_halign(Gtk.Align.END)
+        close.set_hexpand(True)
+        close.connect("clicked", lambda *_args: self.preview_dialog.close())
+        close_row.append(close)
+        sheet.append(close_row)
+        sheet.append(detail_scroll)
+        self.preview_dialog.set_child(sheet)
         keys = Gtk.EventControllerKey.new()
         keys.connect("key-pressed", self._on_key_pressed)
         self.add_controller(keys)
@@ -1104,6 +1117,7 @@ class StoreWindow(Adw.ApplicationWindow):
         index = next((position for position, item in enumerate(visible) if item.id == plugin.id), 0)
         self.page = index // PAGE_SIZE + 1
         self._rebuild_store(select_id=plugin.id)
+        self._open_preview(plugin)
 
     def request_preview(self, url: str, preview: PreviewArt, generation: int) -> None:
         if not url or marketplace_preview_url(urllib.parse.urlsplit(url).path.lstrip("/")) != url:
@@ -1250,9 +1264,6 @@ class StoreWindow(Adw.ApplicationWindow):
         if page_items:
             self.selection.set_selected(chosen)
             self.grid_view.scroll_to(chosen, Gtk.ListScrollFlags.NONE)
-            self._selection_changed(self.selection, None)
-        else:
-            self._show_plugin(None)
         self.catalog_stack.set_visible_child_name("results" if page_items else "empty")
         self._update_pager()
         self._update_result_count()
@@ -1391,9 +1402,16 @@ class StoreWindow(Adw.ApplicationWindow):
         self.page = 1
         self._rebuild_store()
 
-    def _selection_changed(self, _selection, _parameter) -> None:
-        selected = self.selection.get_selected_item()
-        self._show_plugin(selected.plugin if selected else None)
+    def _card_activated(self, _view, position: int) -> None:
+        item = self.filtered_store.get_item(position)
+        if item is not None:
+            self._open_preview(item.plugin)
+
+    def _open_preview(self, plugin: Plugin) -> None:
+        self.preview_plugin = plugin
+        self.preview_dialog.set_title(plugin.name)
+        self._show_plugin(plugin)
+        self.preview_dialog.present(self)
 
     @staticmethod
     def _clear_box(box: Gtk.Box) -> None:
@@ -1436,8 +1454,16 @@ class StoreWindow(Adw.ApplicationWindow):
             ))
             return
 
-        artwork = PreviewArt(176)
-        self.details.append(artwork)
+        preview_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
+        artwork = PreviewArt(240)
+        artwork.set_size_request(360, 240)
+        artwork.set_hexpand(False)
+        preview_row.append(artwork)
+        summary = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        summary.set_hexpand(True)
+        summary.set_valign(Gtk.Align.START)
+        preview_row.append(summary)
+        self.details.append(preview_row)
         artwork.load(plugin, self.request_preview)
 
         badges = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -1459,14 +1485,13 @@ class StoreWindow(Adw.ApplicationWindow):
             badges.append(state)
         elif plugin.install_available:
             badges.append(self._label("READY TO INSTALL", "plugin-badge"))
-        self.details.append(badges)
-
-        self.details.append(self._label(plugin.name, "detail-title"))
-        self.details.append(self._label(
+        summary.append(badges)
+        summary.append(self._label(plugin.name, "detail-title"))
+        summary.append(self._label(
             f"{plugin.author}  ·  {plugin.category}",
             "detail-meta",
         ))
-        self.details.append(self._label(
+        summary.append(self._label(
             plugin.description or "No description was provided.",
             "detail-description",
         ))
@@ -1509,7 +1534,7 @@ class StoreWindow(Adw.ApplicationWindow):
             remove.connect("clicked", self._ask_to_remove, plugin)
             secondary.append(remove)
         primary.append(secondary)
-        self.details.append(primary)
+        summary.append(primary)
 
         self.details.append(self._label("DETAILS", "detail-section-label"))
         facts = Gtk.Grid()
@@ -1663,8 +1688,8 @@ class StoreWindow(Adw.ApplicationWindow):
                 f"Plugin {operation} failed (exit {exit_code}).{detail}"
             )
         self._refresh_installed()
-        selected = self.selection.get_selected_item()
-        self._show_plugin(selected.plugin if selected else None)
+        if self.preview_plugin is not None and self.preview_dialog.get_visible():
+            self._show_plugin(self.preview_plugin)
         return GLib.SOURCE_REMOVE
 
 

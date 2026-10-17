@@ -19,7 +19,7 @@ omarchy-store
 
 You can also run it directly from the checkout with `./omarchy-store` or `python3 app.py`.
 
-Discover scrolls through the feeds. Browse is a paged catalog: search, filters, and sort stay above four plugins at a time, and the selected plugin opens in a detail sheet with its artwork and install action. Press Ctrl+K to jump to search. The catalog can be browsed without Omarchy; install, enable, remove, and installed-state features use the `omarchy` CLI and require an Omarchy installation.
+Discover scrolls through the feeds. Browse fills the page with plugins. Click a card to open its preview, with artwork and the install action. Press Ctrl+K to jump to search. The catalog can be browsed without Omarchy; install, enable, remove, and installed-state features use the `omarchy` CLI and require an Omarchy installation.
 
 ## Security
 

@@ -493,6 +493,7 @@ gridview > child:selected {{ background: transparent; }}
 .fact-value {{ color: {heading}; font-size: 12px; }}
 .tag-chip {{ border: 1px solid {line}; border-radius: 99px; padding: 3px 8px; color: {fg}; font-family: monospace; font-size: 9px; }}
 .empty-state {{ padding: 36px 20px; }}
+.preview-dialog, .preview-dialog .details-panel {{ background: {panel}; }}
 .details-panel {{ background: {panel}; border: 1px solid {line}; border-radius: 8px; padding: 16px; }}
 .detail-mark {{ min-width: 54px; min-height: 54px; border-radius: 8px; font-size: 17px; }}
 .detail-title {{ font-size: 22px; font-weight: 800; }}
