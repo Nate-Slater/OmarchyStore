@@ -1,6 +1,6 @@
 # Omarchy Store
 
-Omarchy Store is a standalone GTK 4 / libadwaita desktop application for browsing the [Omarchy Plugin Marketplace](https://plugins.omarchy.org/). Its dark, accent-colored card catalog makes it easy to search community plugins, review listing and verification metadata, check installed state, and install, enable, or remove supported plugins.
+Omarchy Store is a standalone GTK 4 / libadwaita desktop application for browsing the [Omarchy Plugin Marketplace](https://plugins.omarchy.org/). Its card catalog follows the active Omarchy theme palette and updates live when the theme changes. Search community plugins, review listing and verification metadata, check installed state, and install, enable, or remove supported plugins.
 
 ## Run
 

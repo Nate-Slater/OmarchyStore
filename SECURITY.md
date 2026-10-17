@@ -4,6 +4,8 @@
 
 Omarchy Store runs as a standalone GTK process, separate from `omarchy-shell`. It is not sandboxed and has the permissions of the logged-in user. It can fetch the public plugin catalog and run Omarchy's plugin-management CLI after an in-app confirmation. Installing or enabling a third-party plugin runs that plugin as unsandboxed code in Omarchy's shell; separating the store process does not isolate an installed plugin.
 
+The app reads the active theme's `colors.toml` and `theme.name` from `~/.local/state/omarchy/current/` to style its own window. It does not write theme settings or execute theme-provided content.
+
 ## Untrusted catalog handling
 
 - Catalog metadata comes from `https://plugins.omarchy.org/catalog.json`; redirects to a different URL are rejected.

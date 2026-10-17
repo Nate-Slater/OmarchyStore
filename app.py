@@ -9,15 +9,19 @@ import shutil
 import subprocess
 import sys
 import threading
+import re
+import tomllib
 import urllib.parse
 import urllib.error
 import urllib.request
 import weakref
+from pathlib import Path
 
 import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
+gi.require_version("Gdk", "4.0")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango
 
 from store_model import (
@@ -60,6 +64,7 @@ window.store-window, .store-root { background: #000; color: #d7d7d9; }
 headerbar.store-header { background: #0b0b0d; border-bottom: 1px solid #28282c; }
 .header-brand { font-family: monospace; font-size: 11px; font-weight: 700; letter-spacing: 1px; }
 .header-brand .brand-mark { color: #ff5a36; }
+.theme-pill { border: 1px solid #3a3a3f; border-radius: 4px; padding: 3px 7px; color: #ff5a36; font-family: monospace; font-size: 8px; font-weight: 700; }
 .store-content { background: #000; }
 .hero-panel { background: #0b0b0d; border: 1px solid #28282c; border-radius: 10px; padding: 22px 26px; }
 .eyebrow { color: #ff5a36; font-family: monospace; font-size: 10px; font-weight: 700; letter-spacing: 2px; }
@@ -127,15 +132,109 @@ button.flat.refresh-button:hover { color: #ff5a36; background: #171719; }
 """
 
 
-def install_app_css() -> None:
+THEME_COLORS = {
+    "store_bg": "dark_background",
+    "store_panel": "background",
+    "store_panel_raised": "lighter_background",
+    "store_line": "selection",
+    "store_line_strong": "muted",
+    "store_fg": "foreground",
+    "store_heading": "bright_foreground",
+    "store_muted": "dark_foreground",
+    "store_faint": "muted",
+    "store_accent": "accent",
+    "store_accent_soft": "selection",
+    "store_warning": "yellow",
+    "store_stable": "green",
+    "store_danger": "red",
+}
+THEME_COLOR_HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
+CSS_COLOR_TOKENS = {
+    "#000": "store_bg", "#000000": "store_bg",
+    "#0b0b0d": "store_panel", "#101012": "store_panel_raised",
+    "#171719": "store_panel_raised",
+    "#111012": "store_panel_raised", "#151416": "store_panel_raised",
+    "#151b10": "store_panel_raised", "#28282c": "store_line",
+    "#39393f": "store_line_strong", "#3a3a3f": "store_line_strong",
+    "#4a4a50": "store_line_strong", "#d7d7d9": "store_fg",
+    "#eee": "store_heading", "#eeeeee": "store_heading",
+    "#aaaab0": "store_muted", "#c4b8b5": "store_muted",
+    "#7d7d84": "store_faint", "#ff5a36": "store_accent",
+    "#ff7655": "store_accent", "#ff795c": "store_accent",
+    "#40251f": "store_accent_soft", "#553322": "store_accent_soft",
+    "#21140e": "store_accent_soft", "#f4bd62": "store_warning",
+    "#b4c96f": "store_stable", "#43522c": "store_stable",
+    "#ff9b72": "store_accent", "#100c0b": "store_panel_raised",
+    "#111": "store_bg",
+}
+DEFAULT_THEME_COLORS = {
+    "mode": "dark",
+    "accent": "#ff5a36",
+    "selection": "#40251f",
+    "muted": "#7d7d84",
+    "background": "#0b0b0d",
+    "dark_background": "#000000",
+    "lighter_background": "#101012",
+    "foreground": "#d7d7d9",
+    "dark_foreground": "#aaaab0",
+    "bright_foreground": "#eeeeee",
+    "red": "#ff5a36",
+    "yellow": "#f4bd62",
+    "green": "#b4c96f",
+}
+
+
+def current_omarchy_theme() -> tuple[str, str, dict[str, str]]:
+    state_dir = Path.home() / ".local/state/omarchy/current"
+    values = dict(DEFAULT_THEME_COLORS)
+    theme_id = "dark"
+    try:
+        candidate = (state_dir / "theme.name").read_text(encoding="utf-8")[:80].strip()
+        if re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", candidate):
+            theme_id = candidate
+    except OSError:
+        pass
+    try:
+        raw = (state_dir / "theme/colors.toml").read_bytes()
+        if len(raw) <= 64 * 1024:
+            parsed = tomllib.loads(raw.decode("utf-8"))
+            for key in values:
+                value = parsed.get(key)
+                if key == "mode":
+                    if isinstance(value, str) and value in {"dark", "light"}:
+                        values[key] = value
+                elif isinstance(value, str) and THEME_COLOR_HEX.fullmatch(value):
+                    values[key] = value.lower()
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+        pass
+    palette = {token: values[color_name] for token, color_name in THEME_COLORS.items()}
+    label = " ".join(word.capitalize() for word in theme_id.split("-"))
+    return theme_id, label, {"mode": values["mode"], **palette}
+
+
+def themed_app_css(colors: dict[str, str]) -> str:
+    definitions = "\n".join(
+        f"@define-color {name} {colors[name]};" for name in THEME_COLORS
+    )
+    color_pattern = re.compile(r"#[0-9a-fA-F]{3,8}\b")
+    css = color_pattern.sub(
+        lambda match: f"@{CSS_COLOR_TOKENS[match.group().lower()]}"
+        if match.group().lower() in CSS_COLOR_TOKENS else match.group(),
+        APP_CSS,
+    )
+    return definitions + "\n" + css
+
+
+def install_app_css(colors: dict[str, str]):
     display = Gdk.Display.get_default()
     if display is None:
-        return
+        return None
     provider = Gtk.CssProvider()
-    provider.load_from_data(APP_CSS.encode("utf-8"))
+    provider.load_from_data(themed_app_css(colors).encode("utf-8"))
     Gtk.StyleContext.add_provider_for_display(
         display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
     )
+    return provider
 
 
 class PluginItem(GObject.Object):
@@ -336,6 +435,10 @@ class StoreWindow(Adw.ApplicationWindow):
         self.preview_cache = OrderedDict()
         self.pending_previews = {}
         self.image_pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="omarchy-store-image")
+        self.theme_id, self.theme_name, self.theme_palette = application.theme
+        self.css_provider = application.css_provider
+        self.theme_monitor = None
+        self.theme_reload_source = 0
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         root.add_css_class("store-root")
@@ -382,10 +485,15 @@ class StoreWindow(Adw.ApplicationWindow):
         hero.set_margin_bottom(2)
         hero_copy = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=7)
         hero_copy.set_hexpand(True)
+        kicker = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         eyebrow = Gtk.Label(label="COMMUNITY REGISTRY")
         eyebrow.set_xalign(0)
         eyebrow.add_css_class("eyebrow")
-        hero_copy.append(eyebrow)
+        kicker.append(eyebrow)
+        self.theme_caption = Gtk.Label(label=self.theme_name.upper())
+        self.theme_caption.add_css_class("theme-pill")
+        kicker.append(self.theme_caption)
+        hero_copy.append(kicker)
         hero_title = Gtk.Label(label="discover omarchy plugins")
         hero_title.set_xalign(0)
         hero_title.add_css_class("hero-title")
@@ -545,6 +653,7 @@ class StoreWindow(Adw.ApplicationWindow):
         content.append(panes)
 
         self.connect("close-request", self._on_close_request)
+        self._watch_theme_changes()
         self._refresh(None)
 
     def _refresh(self, _button) -> None:
@@ -681,8 +790,48 @@ class StoreWindow(Adw.ApplicationWindow):
         return GLib.SOURCE_REMOVE
 
     def _on_close_request(self, _window) -> bool:
+        if self.theme_monitor is not None:
+            self.theme_monitor.cancel()
+        if self.theme_reload_source:
+            GLib.source_remove(self.theme_reload_source)
         self.image_pool.shutdown(wait=False, cancel_futures=True)
         return False
+
+    def _watch_theme_changes(self) -> None:
+        current_dir = Path.home() / ".local/state/omarchy/current"
+        try:
+            self.theme_monitor = Gio.File.new_for_path(str(current_dir)).monitor_directory(
+                Gio.FileMonitorFlags.WATCH_MOVES, None
+            )
+            self.theme_monitor.connect("changed", self._theme_state_changed)
+        except GLib.Error:
+            self.theme_monitor = None
+
+    def _theme_state_changed(self, _monitor, file, other_file, _event) -> None:
+        names = {file.get_basename() if file else "", other_file.get_basename() if other_file else ""}
+        if not names.intersection({"theme", "theme.name"}):
+            return
+        if self.theme_reload_source:
+            GLib.source_remove(self.theme_reload_source)
+        self.theme_reload_source = GLib.timeout_add(250, self._reload_theme)
+
+    def _reload_theme(self) -> bool:
+        self.theme_reload_source = 0
+        theme_id, theme_name, palette = current_omarchy_theme()
+        if self.css_provider is not None:
+            try:
+                self.css_provider.load_from_data(themed_app_css(palette).encode("utf-8"))
+            except GLib.Error as error:
+                self.status.set_text(f"Could not apply Omarchy theme: {error.message}")
+                return GLib.SOURCE_REMOVE
+        Adw.StyleManager.get_default().set_color_scheme(
+            Adw.ColorScheme.FORCE_LIGHT if palette["mode"] == "light" else Adw.ColorScheme.FORCE_DARK
+        )
+        self.theme_id = theme_id
+        self.theme_name = theme_name
+        self.theme_palette = palette
+        self.theme_caption.set_text(theme_name.upper())
+        return GLib.SOURCE_REMOVE
 
     def _installed_worker(self) -> None:
         try:
@@ -1040,6 +1189,8 @@ class StoreApplication(Adw.Application):
             flags=Gio.ApplicationFlags.FLAGS_NONE,
         )
         self.window = None
+        self.theme = current_omarchy_theme()
+        self.css_provider = None
 
     def do_activate(self):
         if self.window is None:
@@ -1049,9 +1200,13 @@ class StoreApplication(Adw.Application):
 
 def main() -> int:
     Adw.init()
-    Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_DARK)
-    install_app_css()
+    theme = current_omarchy_theme()
+    Adw.StyleManager.get_default().set_color_scheme(
+        Adw.ColorScheme.FORCE_LIGHT if theme[2]["mode"] == "light" else Adw.ColorScheme.FORCE_DARK
+    )
     app = StoreApplication()
+    app.theme = theme
+    app.css_provider = install_app_css(theme[2])
     return app.run(sys.argv)
 
 
