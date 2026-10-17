@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from store_model import (
     CatalogError,
     MAX_CATALOG_BYTES,
+    carousel_target,
     highlighted_plugins,
     enable_args,
     github_repository,
@@ -127,6 +128,12 @@ class StoreModelTests(unittest.TestCase):
         gems = highlighted_plugins(catalog, stats)
         self.assertEqual({plugin.id for plugin, _ratio in gems}, {"gem.a", "gem.b"})
         self.assertGreater(gems[0][1], 0)
+
+    def test_carousel_buttons_move_and_wrap(self):
+        self.assertEqual(carousel_target(0, 500, 0, 700, 1, wrap=False), 400)
+        self.assertEqual(carousel_target(650, 500, 1000, 1600, 1, wrap=True), 0)
+        self.assertEqual(carousel_target(100, 500, 1000, 1600, -1, wrap=True), 600)
+        self.assertEqual(carousel_target(100, 500, 0, 250, -1, wrap=False), 0)
 
     def test_marketplace_install_commands_are_ignored(self):
         items, _ = normalize_catalog({"plugins": [plugin(

@@ -307,6 +307,27 @@ def highlighted_plugins(
     return [(plugin, times) for plugin, _score, _views, times in gems[:max(0, limit)]]
 
 
+def carousel_target(
+    current: float,
+    page_size: float,
+    cycle: float,
+    maximum: float,
+    direction: int,
+    *,
+    wrap: bool,
+) -> float:
+    """Return a bounded manual carousel step, even when motion is disabled."""
+    step = max(218.0, page_size * 0.8)
+    target = current + (1 if direction >= 0 else -1) * step
+    if wrap and cycle > 0 and maximum >= cycle:
+        if direction >= 0 and target >= cycle:
+            return 0.0
+        if direction < 0 and target < 0:
+            return max(0.0, cycle - step)
+        return max(0.0, min(cycle, target))
+    return max(0.0, min(maximum, target))
+
+
 def parse_catalog(raw: bytes) -> tuple[list[Plugin], str]:
     if len(raw) > MAX_CATALOG_BYTES:
         raise CatalogError("Marketplace catalog exceeded the 24 MiB size limit")

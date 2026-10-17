@@ -31,12 +31,14 @@ from store_model import (
     MAX_ENGAGEMENT_BYTES,
     CatalogError,
     Plugin,
+    carousel_target,
     enable_args,
     github_repository,
     install_args,
     installed_map,
     highlighted_plugins,
     listing_age,
+    listing_time,
     marketplace_preview_url,
     parse_catalog,
     parse_engagement,
@@ -71,6 +73,7 @@ headerbar.store-header { background: #0b0b0d; border-bottom: 1px solid #28282c; 
 .header-brand .brand-mark { color: #ff5a36; }
 .theme-pill { border: 1px solid #3a3a3f; border-radius: 4px; padding: 3px 7px; color: #ff5a36; font-family: monospace; font-size: 8px; font-weight: 700; }
 .store-content { background: #000; }
+scrolledwindow.page-scroll { background: #000; }
 .hero-panel { background: #0b0b0d; border: 1px solid #28282c; border-radius: 10px; padding: 22px 26px; }
 .eyebrow { color: #ff5a36; font-family: monospace; font-size: 10px; font-weight: 700; letter-spacing: 2px; }
 .hero-title { color: #eee; font-family: monospace; font-size: 30px; font-weight: 800; }
@@ -485,14 +488,15 @@ class StoreWindow(Adw.ApplicationWindow):
         self.engagement_loading = False
         self.busy = False
         self.filter_mode = "all"
+        self.sort_mode = "featured"
         self.category = ""
         self.preview_cache = OrderedDict()
         self.pending_previews = {}
         self.image_pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="omarchy-store-image")
         self.theme_id, self.theme_name, self.theme_palette = application.theme
         self.css_provider = application.css_provider
-        self.theme_monitor = None
-        self.theme_reload_source = 0
+        self.theme_signature = (self.theme_id, tuple(sorted(self.theme_palette.items())))
+        self.theme_watch_source = 0
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         root.add_css_class("store-root")
@@ -532,7 +536,12 @@ class StoreWindow(Adw.ApplicationWindow):
         content.set_margin_start(24)
         content.set_margin_end(24)
         content.set_vexpand(True)
-        root.append(content)
+        self.page_scroll = Gtk.ScrolledWindow()
+        self.page_scroll.add_css_class("page-scroll")
+        self.page_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.page_scroll.set_child(content)
+        self.page_scroll.set_vexpand(True)
+        root.append(self.page_scroll)
 
         hero = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=20)
         hero.add_css_class("hero-panel")
@@ -621,6 +630,16 @@ class StoreWindow(Adw.ApplicationWindow):
         recent_spacer = Gtk.Box()
         recent_spacer.set_hexpand(True)
         recent_header.append(recent_spacer)
+        self.recent_back = Gtk.Button(label="‹")
+        self.recent_back.add_css_class("carousel-arrow")
+        self.recent_back.set_tooltip_text("Previous newly added plugins")
+        self.recent_back.connect("clicked", self._scroll_recent, -1)
+        recent_header.append(self.recent_back)
+        self.recent_forward = Gtk.Button(label="›")
+        self.recent_forward.add_css_class("carousel-arrow")
+        self.recent_forward.set_tooltip_text("Next newly added plugins")
+        self.recent_forward.connect("clicked", self._scroll_recent, 1)
+        recent_header.append(self.recent_forward)
         self.recent_pause_button = Gtk.Button(label="Pause")
         self.recent_pause_button.add_css_class("carousel-arrow")
         self.recent_pause_button.set_tooltip_text("Pause the newly added feed")
@@ -638,6 +657,7 @@ class StoreWindow(Adw.ApplicationWindow):
             scroll.set_child(track)
             self.recent_section.append(scroll)
             self.recent_tracks.append((scroll, track))
+            scroll.get_hadjustment().connect("changed", self._recent_adjustment_changed)
         self.recent_section.set_visible(False)
         self.marquee_timer = 0
         self.marquee_paused_by_user = False
@@ -696,6 +716,13 @@ class StoreWindow(Adw.ApplicationWindow):
         self.category_filter.add_css_class("category-filter")
         self.category_filter.connect("notify::selected", self._category_changed)
         filter_row.append(self.category_filter)
+        self.sort_filter = Gtk.DropDown.new_from_strings([
+            "Featured", "Recently added", "A–Z", "Most starred", "Verified first"
+        ])
+        self.sort_filter.add_css_class("category-filter")
+        self.sort_filter.set_tooltip_text("Sort plugin listings")
+        self.sort_filter.connect("notify::selected", self._sort_changed)
+        filter_row.append(self.sort_filter)
 
         count_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         self.status = Gtk.Label(label="Loading marketplace and installed plugins…")
@@ -751,6 +778,7 @@ class StoreWindow(Adw.ApplicationWindow):
         panes.set_shrink_start_child(False)
         panes.set_shrink_end_child(True)
         panes.set_vexpand(True)
+        panes.set_size_request(-1, 480)
         content.append(panes)
 
         self.connect("close-request", self._on_close_request)
@@ -820,8 +848,10 @@ class StoreWindow(Adw.ApplicationWindow):
     def _populate_recent(self) -> None:
         if self.marquee_timer:
             GLib.source_remove(self.marquee_timer)
-            self.marquee_timer = 0
+        self.marquee_timer = 0
         self.marquee_rows = []
+        self.recent_back.set_sensitive(False)
+        self.recent_forward.set_sensitive(False)
         fresh = recently_added(self.plugins, hours=24)
         week = recently_added(self.plugins, hours=24 * 7)
         carousel = fresh if fresh else week
@@ -859,6 +889,7 @@ class StoreWindow(Adw.ApplicationWindow):
                     "direction": 1 if row_index == 0 else -1,
                     "duration": max(30.0, len(row_items) * 5.0),
                 })
+        self._update_recent_navigation()
         self.marquee_last_tick = time.monotonic()
         if self.marquee_animated:
             self.marquee_timer = GLib.timeout_add(16, self._animate_recent)
@@ -876,6 +907,35 @@ class StoreWindow(Adw.ApplicationWindow):
         target = adjustment.get_value() + direction * step
         maximum = max(0, adjustment.get_upper() - adjustment.get_page_size())
         adjustment.set_value(max(0, min(maximum, target)))
+
+    def _recent_adjustment_changed(self, _adjustment) -> None:
+        self._update_recent_navigation()
+
+    def _update_recent_navigation(self) -> None:
+        can_scroll = any(
+            scroll.get_hadjustment().get_upper() - scroll.get_hadjustment().get_page_size() > 1
+            for scroll, _track in self.recent_tracks
+        )
+        self.recent_back.set_sensitive(can_scroll)
+        self.recent_forward.set_sensitive(can_scroll)
+
+    def _scroll_recent(self, _button, direction: int) -> None:
+        if not self.recent_section.get_visible():
+            return
+        self.marquee_paused_by_user = True
+        self.recent_pause_button.set_label("Play")
+        for scroll, track in self.recent_tracks:
+            adjustment = scroll.get_hadjustment()
+            page_size = adjustment.get_page_size()
+            current = adjustment.get_value()
+            first = track.get_first_child()
+            cycle = first.get_width() + track.get_spacing() if first else 0
+            maximum = max(0, adjustment.get_upper() - page_size)
+            target = carousel_target(
+                current, page_size, cycle, maximum, direction,
+                wrap=self.marquee_animated,
+            )
+            adjustment.set_value(target)
 
     def _toggle_recent_motion(self, _button) -> None:
         self.marquee_paused_by_user = not self.marquee_paused_by_user
@@ -983,10 +1043,8 @@ class StoreWindow(Adw.ApplicationWindow):
         return GLib.SOURCE_REMOVE
 
     def _on_close_request(self, _window) -> bool:
-        if self.theme_monitor is not None:
-            self.theme_monitor.cancel()
-        if self.theme_reload_source:
-            GLib.source_remove(self.theme_reload_source)
+        if self.theme_watch_source:
+            GLib.source_remove(self.theme_watch_source)
         if self.marquee_timer:
             GLib.source_remove(self.marquee_timer)
             self.marquee_timer = 0
@@ -994,25 +1052,16 @@ class StoreWindow(Adw.ApplicationWindow):
         return False
 
     def _watch_theme_changes(self) -> None:
-        current_dir = Path.home() / ".local/state/omarchy/current"
-        try:
-            self.theme_monitor = Gio.File.new_for_path(str(current_dir)).monitor_directory(
-                Gio.FileMonitorFlags.WATCH_MOVES, None
-            )
-            self.theme_monitor.connect("changed", self._theme_state_changed)
-        except GLib.Error:
-            self.theme_monitor = None
+        self.theme_watch_source = GLib.timeout_add_seconds(1, self._check_theme_state)
 
-    def _theme_state_changed(self, _monitor, file, other_file, _event) -> None:
-        names = {file.get_basename() if file else "", other_file.get_basename() if other_file else ""}
-        if not names.intersection({"theme", "theme.name"}):
-            return
-        if self.theme_reload_source:
-            GLib.source_remove(self.theme_reload_source)
-        self.theme_reload_source = GLib.timeout_add(250, self._reload_theme)
+    def _check_theme_state(self) -> bool:
+        theme_id, _theme_name, palette = current_omarchy_theme()
+        signature = (theme_id, tuple(sorted(palette.items())))
+        if signature != self.theme_signature:
+            self._reload_theme()
+        return GLib.SOURCE_CONTINUE
 
     def _reload_theme(self) -> bool:
-        self.theme_reload_source = 0
         theme_id, theme_name, palette = current_omarchy_theme()
         if self.css_provider is not None:
             try:
@@ -1026,6 +1075,7 @@ class StoreWindow(Adw.ApplicationWindow):
         self.theme_id = theme_id
         self.theme_name = theme_name
         self.theme_palette = palette
+        self.theme_signature = (theme_id, tuple(sorted(palette.items())))
         self.theme_caption.set_text(theme_name.upper())
         return GLib.SOURCE_REMOVE
 
@@ -1063,7 +1113,7 @@ class StoreWindow(Adw.ApplicationWindow):
     def _rebuild_store(self) -> None:
         selected = self.selection.get_selected_item()
         selected_id = selected.plugin.id if selected else ""
-        self.store.splice(0, self.store.get_n_items(), [PluginItem(p) for p in self.plugins])
+        self.store.splice(0, self.store.get_n_items(), [PluginItem(p) for p in self._ordered_plugins()])
         self.custom_filter.changed(Gtk.FilterChange.DIFFERENT)
         if selected_id:
             for position in range(self.filtered_store.get_n_items()):
@@ -1077,6 +1127,28 @@ class StoreWindow(Adw.ApplicationWindow):
     def _update_result_count(self) -> None:
         total = self.filtered_store.get_n_items() if hasattr(self, "filtered_store") else 0
         self.result_count.set_text(f"SHOWING {total:,} / {len(self.plugins):,}")
+
+    def _ordered_plugins(self) -> list[Plugin]:
+        if self.sort_mode == "recent":
+            return sorted(self.plugins, key=lambda p: listing_time(p).timestamp() if listing_time(p) else 0, reverse=True)
+        if self.sort_mode == "az":
+            return sorted(self.plugins, key=lambda p: p.name.casefold())
+        if self.sort_mode == "stars":
+            return sorted(self.plugins, key=lambda p: (-p.stars, p.name.casefold()))
+        if self.sort_mode == "verified":
+            return sorted(self.plugins, key=lambda p: (p.verification_status != "verified", not p.install_available, p.name.casefold()))
+        return sorted(self.plugins, key=lambda p: (not p.install_available, p.verification_status != "verified", p.name.casefold()))
+
+    def _sort_changed(self, dropdown, _pspec) -> None:
+        options = ("featured", "recent", "az", "stars", "verified")
+        selected = dropdown.get_selected()
+        if selected >= len(options):
+            return
+        mode = options[selected]
+        if mode == self.sort_mode:
+            return
+        self.sort_mode = mode
+        self._rebuild_store()
 
     def _update_refresh_button(self) -> None:
         self.refresh_button.set_sensitive(

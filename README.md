@@ -1,6 +1,6 @@
 # Omarchy Store
 
-Omarchy Store is a standalone GTK 4 / libadwaita desktop application for browsing the [Omarchy Plugin Marketplace](https://plugins.omarchy.org/). Its card catalog follows the active Omarchy theme palette and updates live when the theme changes. Browse the marketplace-style **Hidden Gems** and animated **Just Landed** carousels, then search plugins, review listing and verification metadata, check installed state, and install, enable, or remove supported plugins.
+Omarchy Store is a standalone GTK 4 / libadwaita desktop application for browsing the [Omarchy Plugin Marketplace](https://plugins.omarchy.org/). Its card catalog follows the active Omarchy theme palette and updates live when the theme changes. Browse **Hidden Gems** and the navigable, two-row **Just Landed** carousel, then search, filter by category or install state, sort the full catalog, and inspect plugin details.
 
 ## Run
 
@@ -19,7 +19,7 @@ omarchy-store
 
 You can also run it directly from the checkout with `./omarchy-store` or `python3 app.py`.
 
-The catalog can be browsed without Omarchy. Install, enable, remove, and installed-state features use the `omarchy` CLI and require an Omarchy installation.
+The full catalog has search, category and install-state filters, and sorting by featured, recency, name, stars, or verification. The page scrolls independently from the catalog grid. The catalog can be browsed without Omarchy; install, enable, remove, and installed-state features use the `omarchy` CLI and require an Omarchy installation.
 
 ## Security
 
