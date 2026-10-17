@@ -833,11 +833,13 @@ class StoreWindow(Adw.ApplicationWindow):
         browse.append(list_column)
 
         self.preview_plugin: Plugin | None = None
+        self.preview_return_view: str | None = None
         self.preview_dialog = Adw.Dialog(title="Plugin preview")
         self.preview_dialog.set_presentation_mode(Adw.DialogPresentationMode.FLOATING)
         self.preview_dialog.set_content_width(860)
         self.preview_dialog.set_content_height(520)
         self.preview_dialog.add_css_class("preview-dialog")
+        self.preview_dialog.connect("closed", self._preview_closed)
         self.details = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         self.details.add_css_class("details-panel")
         self.details.set_margin_top(4)
@@ -1105,18 +1107,7 @@ class StoreWindow(Adw.ApplicationWindow):
         self.hero_scrim.set_visible(True)
 
     def _select_recent_plugin(self, _button, plugin: Plugin) -> None:
-        self._show_view("browse")
-        self._suspend_filter = True
-        self.filter_buttons["all"].set_active(True)
-        self.filter_mode = "all"
-        self.search.set_text("")
-        self.category_filter.set_selected(0)
-        self.category = ""
-        self._suspend_filter = False
-        visible = self._visible_plugins()
-        index = next((position for position, item in enumerate(visible) if item.id == plugin.id), 0)
-        self.page = index // PAGE_SIZE + 1
-        self._rebuild_store(select_id=plugin.id)
+        self.preview_return_view = "discover"
         self._open_preview(plugin)
 
     def request_preview(self, url: str, preview: PreviewArt, generation: int) -> None:
@@ -1405,7 +1396,15 @@ class StoreWindow(Adw.ApplicationWindow):
     def _card_activated(self, _view, position: int) -> None:
         item = self.filtered_store.get_item(position)
         if item is not None:
+            self.preview_return_view = None
             self._open_preview(item.plugin)
+
+    def _preview_closed(self, _dialog) -> None:
+        return_view = self.preview_return_view
+        self.preview_return_view = None
+        self.preview_plugin = None
+        if return_view:
+            self._show_view(return_view)
 
     def _open_preview(self, plugin: Plugin) -> None:
         self.preview_plugin = plugin
