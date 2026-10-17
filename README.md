@@ -1,6 +1,6 @@
 # Omarchy Store
 
-Omarchy Store is a standalone GTK 4 / libadwaita desktop application for browsing the [Omarchy Plugin Marketplace](https://plugins.omarchy.org/). Its card catalog follows the active Omarchy theme palette and updates live when the theme changes. Search community plugins, review listing and verification metadata, check installed state, and install, enable, or remove supported plugins.
+Omarchy Store is a standalone GTK 4 / libadwaita desktop application for browsing the [Omarchy Plugin Marketplace](https://plugins.omarchy.org/). Its card catalog follows the active Omarchy theme palette and updates live when the theme changes. Browse the marketplace-style **Hidden Gems** and animated **Just Landed** carousels, then search plugins, review listing and verification metadata, check installed state, and install, enable, or remove supported plugins.
 
 ## Run
 
@@ -35,7 +35,7 @@ Remove the standalone app with `./uninstall.sh`. This removes its launcher, desk
 
 ## Network and data
 
-The app fetches the public `https://plugins.omarchy.org/catalog.json` over HTTPS and loads listing thumbnails only from that marketplace's validated `assets/img/plugins/` image path. Image downloads are size-limited, redirect-free, and cached in memory; arbitrary hosts and scripts are never loaded. These requests disclose normal network metadata to the marketplace host. The app sends no telemetry and stores no catalog cache or user data. Repository links open in the system browser only after GitHub URL validation.
+The app fetches the public `https://plugins.omarchy.org/catalog.json` and aggregate engagement stats from `https://api.omarchyplugins.com/v1/stats` over HTTPS. It loads listing thumbnails only from validated marketplace image paths. Image downloads are size-limited, redirect-free, and cached in memory; arbitrary hosts and scripts are never loaded. Requests disclose normal network metadata to these hosts. The app sends no engagement events, telemetry, or user data and stores no catalog cache. Repository links open in the system browser only after GitHub URL validation.
 
 ## Development checks
 

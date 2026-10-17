@@ -5,12 +5,14 @@ from datetime import datetime, timezone
 from store_model import (
     CatalogError,
     MAX_CATALOG_BYTES,
+    highlighted_plugins,
     enable_args,
     github_repository,
     install_args,
     installed_map,
     normalize_catalog,
     marketplace_preview_url,
+    normalize_engagement,
     parse_catalog,
     recently_added,
     remove_args,
@@ -107,6 +109,24 @@ class StoreModelTests(unittest.TestCase):
         ]})
         now = datetime(2026, 10, 17, 12, 0, tzinfo=timezone.utc)
         self.assertEqual([item.id for item in recently_added(items, now=now)], ["fresh.one"])
+
+    def test_hidden_gems_use_verified_low_view_install_rates(self):
+        catalog, _ = normalize_catalog({"plugins": [
+            plugin(id="top", verificationStatus="verified", previewThumbnail="assets/img/plugins/top.webp"),
+            plugin(id="gem.a", verificationStatus="verified", previewThumbnail="assets/img/plugins/gem-a.webp"),
+            plugin(id="gem.b", verificationStatus="verified", previewThumbnail="assets/img/plugins/gem-b.webp"),
+            plugin(id="unverified", verificationStatus="unverified", previewThumbnail="assets/img/plugins/u.webp"),
+        ]})
+        stats = normalize_engagement({"plugins": {
+            "top": {"views": 200, "copies": 40, "hearts": 1},
+            "gem.a": {"views": 50, "copies": 20, "hearts": 0},
+            "gem.b": {"views": 100, "copies": 30, "hearts": 0},
+            "unverified": {"views": 30, "copies": 20, "hearts": 0},
+            "bad..id": {"views": 999, "copies": 999},
+        }})
+        gems = highlighted_plugins(catalog, stats)
+        self.assertEqual({plugin.id for plugin, _ratio in gems}, {"gem.a", "gem.b"})
+        self.assertGreater(gems[0][1], 0)
 
     def test_marketplace_install_commands_are_ignored(self):
         items, _ = normalize_catalog({"plugins": [plugin(

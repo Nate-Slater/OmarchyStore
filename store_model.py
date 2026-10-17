@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import json
+import math
 import re
 from typing import Any
 
@@ -12,6 +13,7 @@ from typing import Any
 CATALOG_URL = "https://plugins.omarchy.org/catalog.json"
 MAX_CATALOG_BYTES = 24 * 1024 * 1024
 MAX_CATALOG_ENTRIES = 20_000
+MAX_ENGAGEMENT_BYTES = 4 * 1024 * 1024
 
 _PLUGIN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _GITHUB_REPO = re.compile(
@@ -218,6 +220,91 @@ def listing_age(plugin: Plugin, *, now: datetime | None = None) -> str:
         return f"{minutes}M AGO"
     hours = minutes // 60
     return f"{hours}H AGO" if hours < 24 else f"{hours // 24}D AGO"
+
+
+def normalize_engagement(data: Any) -> dict[str, dict[str, int]]:
+    if not isinstance(data, dict) or not isinstance(data.get("plugins"), dict):
+        raise CatalogError("Marketplace engagement response is invalid")
+    source = data["plugins"]
+    if len(source) > MAX_CATALOG_ENTRIES:
+        raise CatalogError("Marketplace engagement response has too many entries")
+    result: dict[str, dict[str, int]] = {}
+    for plugin_id, counts in source.items():
+        if not valid_plugin_id(plugin_id) or not isinstance(counts, dict):
+            continue
+        result[plugin_id] = {
+            key: max(0, min(1_000_000_000, value))
+            if isinstance(value, int) and not isinstance(value, bool) else 0
+            for key, value in (("views", counts.get("views")),
+                               ("copies", counts.get("copies")),
+                               ("hearts", counts.get("hearts")))
+        }
+    return result
+
+
+def parse_engagement(raw: bytes) -> dict[str, dict[str, int]]:
+    if len(raw) > MAX_ENGAGEMENT_BYTES:
+        raise CatalogError("Marketplace engagement response exceeded the size limit")
+    try:
+        return normalize_engagement(json.loads(raw.decode("utf-8")))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise CatalogError("Marketplace engagement response is not valid JSON") from error
+
+
+def install_rate_score(plugin: Plugin, counts: dict[str, int]) -> float | None:
+    if not plugin.install_available:
+        return None
+    views = counts.get("views", 0)
+    copies = min(counts.get("copies", 0), views)
+    if views < 20:
+        return None
+    if copies == 0:
+        return 0.0
+    rate = copies / views
+    z = 1.96
+    center = rate + z * z / (2 * views)
+    margin = z * math.sqrt((rate * (1 - rate) + z * z / (4 * views)) / views)
+    return (center - margin) / (1 + z * z / views)
+
+
+def highlighted_plugins(
+    plugins: list[Plugin], stats: dict[str, dict[str, int]], *, limit: int = 9
+) -> list[tuple[Plugin, float]]:
+    if not plugins:
+        return []
+    view_counts = sorted(stats.get(plugin.id, {}).get("views", 0) for plugin in plugins)
+    threshold = view_counts[min(len(view_counts) - 1, int(len(view_counts) * 0.75))]
+    rates = []
+    for plugin in plugins:
+        counts = stats.get(plugin.id, {})
+        score = install_rate_score(plugin, counts)
+        if score is not None:
+            views = counts.get("views", 0)
+            rates.append(min(counts.get("copies", 0), views) / views)
+    rates.sort()
+    median = None
+    if rates:
+        middle = len(rates) // 2
+        median = rates[middle] if len(rates) % 2 else (rates[middle - 1] + rates[middle]) / 2
+
+    gems = []
+    for plugin in plugins:
+        counts = stats.get(plugin.id, {})
+        views = counts.get("views", 0)
+        score = install_rate_score(plugin, counts)
+        if (
+            plugin.verification_status != "verified"
+            or not plugin.preview_url
+            or score is None
+            or views >= threshold
+        ):
+            continue
+        copies = min(counts.get("copies", 0), views)
+        ratio = copies / views if views else 0
+        times = ratio / median if median else 0
+        gems.append((plugin, score, views, times))
+    gems.sort(key=lambda item: (-item[1], -item[2], item[0].name.casefold()))
+    return [(plugin, times) for plugin, _score, _views, times in gems[:max(0, limit)]]
 
 
 def parse_catalog(raw: bytes) -> tuple[list[Plugin], str]:

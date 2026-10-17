@@ -8,7 +8,7 @@ The app reads the active theme's `colors.toml` and `theme.name` from `~/.local/s
 
 ## Untrusted catalog handling
 
-- Catalog metadata comes from `https://plugins.omarchy.org/catalog.json`; redirects to a different URL are rejected.
+- Catalog metadata comes from `https://plugins.omarchy.org/catalog.json`; aggregate public engagement data comes from `https://api.omarchyplugins.com/v1/stats`. Both are GET-only and redirects are rejected.
 - Preview pictures are fetched only from validated static paths below `https://plugins.omarchy.org/assets/img/plugins/`; only WebP, PNG, and JPEG responses up to 2 MiB are accepted, and redirects are rejected.
 - Catalog size, entry count, and displayed field lengths are bounded.
 - Listing content is rendered as GTK text, not markup or executable code.
@@ -20,7 +20,7 @@ The app reads the active theme's `colors.toml` and `theme.name` from `~/.local/s
 
 All subprocesses use an argument vector and `shell=False`. The app delegates to `omarchy plugin list --json`, `omarchy plugin add`, `omarchy plugin enable`, and `omarchy plugin remove`; it does not implement a downloader, installer, update mechanism, or privilege escalation. Install and enable require confirmation. Confirmation explains the unsandboxed execution boundary and that `plugin add` uses current upstream HEAD rather than a marketplace-verified commit. The app does not automatically update plugins.
 
-Marketplace verification is listing metadata only, not a security audit, endorsement, or guarantee. Review plugin source and dependencies before installing. The app itself stores no catalog cache or user data and sends no telemetry; Omarchy's CLI writes the installed plugin files when requested. Fetching preview images creates ordinary requests to the marketplace host, which can observe the user's network address as with any image request.
+Marketplace verification is listing metadata only, not a security audit, endorsement, or guarantee. Review plugin source and dependencies before installing. The app itself stores no catalog cache or user data and sends no engagement events or telemetry; it only reads aggregate engagement stats. Omarchy's CLI writes the installed plugin files when requested. Catalog, stats, and preview requests disclose ordinary network metadata to their respective hosts.
 
 ## Verification
 
@@ -29,4 +29,4 @@ python3 -m unittest -v
 python3 -c 'import ast; ast.parse(open("app.py", encoding="utf-8").read())'
 ```
 
-The unit tests cover catalog validation, image URL allowlisting, recent-listing dates, unsupported layouts, fixed CLI arguments, search, and installed-list parsing. UI runtime testing requires a graphical GTK session.
+The unit tests cover catalog and engagement validation, image URL allowlisting, recent listings, hidden-gem selection, unsupported layouts, fixed CLI arguments, search, and installed-list parsing. UI runtime testing requires a graphical GTK session.

@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import re
 import tomllib
 import urllib.parse
@@ -27,15 +28,18 @@ from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango
 from store_model import (
     CATALOG_URL,
     MAX_CATALOG_BYTES,
+    MAX_ENGAGEMENT_BYTES,
     CatalogError,
     Plugin,
     enable_args,
     github_repository,
     install_args,
     installed_map,
+    highlighted_plugins,
     listing_age,
     marketplace_preview_url,
     parse_catalog,
+    parse_engagement,
     recently_added,
     remove_args,
     search_plugins,
@@ -50,6 +54,7 @@ SECURITY_NOTICE = (
 )
 MAX_PREVIEW_BYTES = 2 * 1024 * 1024
 MAX_CACHED_PREVIEWS = 40
+ENGAGEMENT_URL = "https://api.omarchyplugins.com/v1/stats"
 
 
 class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -398,6 +403,37 @@ class RecentPluginCard(Gtk.Button):
         self.preview.load(plugin, window.request_preview)
 
 
+class FeaturedPluginCard(Gtk.Button):
+    def __init__(self, window, plugin: Plugin, install_rate_multiple: float):
+        super().__init__()
+        self.add_css_class("recent-card")
+        self.set_size_request(218, -1)
+        self.connect("clicked", window._select_recent_plugin, plugin)
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=7)
+        self.preview = PreviewArt(104)
+        content.append(self.preview)
+        name = Gtk.Label(label=plugin.name)
+        name.set_xalign(0)
+        name.set_ellipsize(Pango.EllipsizeMode.END)
+        name.add_css_class("recent-name")
+        content.append(name)
+        author = Gtk.Label(label=f"{plugin.author}  ·  VERIFIED")
+        author.set_xalign(0)
+        author.set_ellipsize(Pango.EllipsizeMode.END)
+        author.add_css_class("recent-byline")
+        content.append(author)
+        fact = Gtk.Label(label=(
+            f"{install_rate_multiple:.1f}× COPIES / VIEW VS MEDIAN"
+            if install_rate_multiple else "HIDDEN GEM  ·  VERIFIED"
+        ))
+        fact.set_xalign(0)
+        fact.set_ellipsize(Pango.EllipsizeMode.END)
+        fact.add_css_class("recent-byline")
+        content.append(fact)
+        self.set_child(content)
+        self.preview.load(plugin, window.request_preview)
+
+
 def fetch_catalog() -> tuple[list[Plugin], str]:
     request = urllib.request.Request(
         CATALOG_URL,
@@ -416,6 +452,22 @@ def fetch_catalog() -> tuple[list[Plugin], str]:
     return parse_catalog(raw)
 
 
+def fetch_engagement_stats() -> dict[str, dict[str, int]]:
+    request = urllib.request.Request(
+        ENGAGEMENT_URL,
+        headers={"Accept": "application/json", "User-Agent": "OmarchyStore/1.0"},
+        method="GET",
+    )
+    try:
+        with NO_REDIRECT_OPENER.open(request, timeout=15) as response:
+            if response.geturl() != ENGAGEMENT_URL:
+                raise CatalogError("Marketplace statistics redirected away from their API URL")
+            raw = response.read(MAX_ENGAGEMENT_BYTES + 1)
+    except urllib.error.URLError as error:
+        raise CatalogError(f"Could not reach the marketplace statistics API: {error}") from error
+    return parse_engagement(raw)
+
+
 class StoreWindow(Adw.ApplicationWindow):
     def __init__(self, application: Adw.Application):
         super().__init__(application=application, title="Omarchy Store")
@@ -425,10 +477,12 @@ class StoreWindow(Adw.ApplicationWindow):
 
         self.plugins: list[Plugin] = []
         self.installed: dict[str, dict[str, bool]] = {}
+        self.engagement: dict[str, dict[str, int]] = {}
         self.catalog_ready = False
         self.installed_ready = False
         self.catalog_loading = False
         self.installed_loading = False
+        self.engagement_loading = False
         self.busy = False
         self.filter_mode = "all"
         self.category = ""
@@ -519,6 +573,40 @@ class StoreWindow(Adw.ApplicationWindow):
         hero.append(hero_count)
         content.append(hero)
 
+        self.gems_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self.gems_section.add_css_class("recent-section")
+        gems_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        gems_title = Gtk.Label(label="HIDDEN GEMS")
+        gems_title.set_xalign(0)
+        gems_title.add_css_class("recent-heading")
+        gems_header.append(gems_title)
+        self.gems_summary = Gtk.Label(label="VERIFIED · OFTEN COPIED · NOT AMONG THE MOST VIEWED")
+        self.gems_summary.set_xalign(0)
+        self.gems_summary.add_css_class("recent-summary")
+        gems_header.append(self.gems_summary)
+        gems_spacer = Gtk.Box()
+        gems_spacer.set_hexpand(True)
+        gems_header.append(gems_spacer)
+        self.gems_back = Gtk.Button(label="‹")
+        self.gems_back.add_css_class("carousel-arrow")
+        self.gems_back.set_tooltip_text("Previous highlighted plugins")
+        self.gems_back.connect("clicked", self._scroll_gems, -1)
+        gems_header.append(self.gems_back)
+        self.gems_forward = Gtk.Button(label="›")
+        self.gems_forward.add_css_class("carousel-arrow")
+        self.gems_forward.set_tooltip_text("Next highlighted plugins")
+        self.gems_forward.connect("clicked", self._scroll_gems, 1)
+        gems_header.append(self.gems_forward)
+        self.gems_section.append(gems_header)
+        self.gems_cards = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        self.gems_scroll = Gtk.ScrolledWindow()
+        self.gems_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+        self.gems_scroll.set_min_content_height(174)
+        self.gems_scroll.set_child(self.gems_cards)
+        self.gems_section.append(self.gems_scroll)
+        self.gems_section.set_visible(False)
+        content.append(self.gems_section)
+
         self.recent_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.recent_section.add_css_class("recent-section")
         recent_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -533,25 +621,38 @@ class StoreWindow(Adw.ApplicationWindow):
         recent_spacer = Gtk.Box()
         recent_spacer.set_hexpand(True)
         recent_header.append(recent_spacer)
-        self.recent_back = Gtk.Button(label="‹")
-        self.recent_back.add_css_class("carousel-arrow")
-        self.recent_back.set_tooltip_text("Previous recently added plugins")
-        self.recent_back.connect("clicked", self._scroll_recent, -1)
-        recent_header.append(self.recent_back)
-        self.recent_forward = Gtk.Button(label="›")
-        self.recent_forward.add_css_class("carousel-arrow")
-        self.recent_forward.set_tooltip_text("Next recently added plugins")
-        self.recent_forward.connect("clicked", self._scroll_recent, 1)
-        recent_header.append(self.recent_forward)
+        self.recent_pause_button = Gtk.Button(label="Pause")
+        self.recent_pause_button.add_css_class("carousel-arrow")
+        self.recent_pause_button.set_tooltip_text("Pause the newly added feed")
+        self.recent_pause_button.connect("clicked", self._toggle_recent_motion)
+        self.recent_pause_button.set_visible(False)
+        recent_header.append(self.recent_pause_button)
         self.recent_section.append(recent_header)
-
-        self.recent_cards = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        self.recent_scroll = Gtk.ScrolledWindow()
-        self.recent_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
-        self.recent_scroll.set_min_content_height(174)
-        self.recent_scroll.set_child(self.recent_cards)
-        self.recent_section.append(self.recent_scroll)
+        self.recent_tracks = []
+        self.marquee_rows = []
+        for row_index in range(2):
+            track = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+            scroll = Gtk.ScrolledWindow()
+            scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.NEVER)
+            scroll.set_min_content_height(166)
+            scroll.set_child(track)
+            self.recent_section.append(scroll)
+            self.recent_tracks.append((scroll, track))
         self.recent_section.set_visible(False)
+        self.marquee_timer = 0
+        self.marquee_paused_by_user = False
+        self.marquee_pointer_inside = False
+        self.marquee_focus_inside = False
+        settings = Gtk.Settings.get_default()
+        self.animations_enabled = bool(settings.get_property("gtk-enable-animations")) if settings else True
+        motion = Gtk.EventControllerMotion.new()
+        motion.connect("enter", self._marquee_pointer_enter)
+        motion.connect("leave", self._marquee_pointer_leave)
+        self.recent_section.add_controller(motion)
+        focus = Gtk.EventControllerFocus.new()
+        focus.connect("enter", self._marquee_focus_enter)
+        focus.connect("leave", self._marquee_focus_leave)
+        self.recent_section.add_controller(focus)
         content.append(self.recent_section)
 
         warning = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
@@ -657,13 +758,15 @@ class StoreWindow(Adw.ApplicationWindow):
         self._refresh(None)
 
     def _refresh(self, _button) -> None:
-        if self.catalog_loading or self.installed_loading or self.busy:
+        if self.catalog_loading or self.installed_loading or self.engagement_loading or self.busy:
             return
         self.catalog_loading = True
+        self.engagement_loading = True
         self.refresh_button.set_sensitive(False)
         self.status.set_text("Refreshing marketplace and installed plugins…")
         threading.Thread(target=self._catalog_worker, daemon=True).start()
         self._refresh_installed()
+        threading.Thread(target=self._engagement_worker, daemon=True).start()
 
     def _refresh_installed(self) -> None:
         if self.installed_loading:
@@ -679,6 +782,20 @@ class StoreWindow(Adw.ApplicationWindow):
         except Exception as error:  # deliver worker exceptions to the GTK thread
             GLib.idle_add(self._catalog_loaded, None, str(error))
 
+    def _engagement_worker(self) -> None:
+        try:
+            result = fetch_engagement_stats()
+            GLib.idle_add(self._engagement_loaded, result, None)
+        except Exception as error:
+            GLib.idle_add(self._engagement_loaded, None, str(error))
+
+    def _engagement_loaded(self, result, error) -> bool:
+        self.engagement_loading = False
+        self._update_refresh_button()
+        self.engagement = result or {}
+        self._populate_hidden_gems()
+        return GLib.SOURCE_REMOVE
+
     def _catalog_loaded(self, result, error) -> bool:
         self.catalog_loading = False
         self._update_refresh_button()
@@ -693,6 +810,7 @@ class StoreWindow(Adw.ApplicationWindow):
         self.category = ""
         self._rebuild_store()
         self._populate_recent()
+        self._populate_hidden_gems()
         suffix = f" · catalog updated {generated_at[:10]}" if generated_at else ""
         self.status.set_text(f"COMMUNITY REGISTRY{suffix}")
         self.hero_total.set_text(f"{len(self.plugins):,}")
@@ -700,7 +818,10 @@ class StoreWindow(Adw.ApplicationWindow):
         return GLib.SOURCE_REMOVE
 
     def _populate_recent(self) -> None:
-        self._clear_box(self.recent_cards)
+        if self.marquee_timer:
+            GLib.source_remove(self.marquee_timer)
+            self.marquee_timer = 0
+        self.marquee_rows = []
         fresh = recently_added(self.plugins, hours=24)
         week = recently_added(self.plugins, hours=24 * 7)
         carousel = fresh if fresh else week
@@ -711,15 +832,87 @@ class StoreWindow(Adw.ApplicationWindow):
             f"{len(fresh)} NEW IN 24H  ·  {len(week)} IN 7 DAYS"
             if fresh else f"NO NEW LISTINGS TODAY  ·  {len(week)} IN 7 DAYS"
         )
-        for plugin in carousel[:12]:
-            self.recent_cards.append(RecentPluginCard(self, plugin))
+        items = carousel[:48]
+        self.marquee_animated = bool(fresh and len(items) > 6 and self.animations_enabled)
+        self.marquee_paused_by_user = False
+        self.recent_pause_button.set_label("Pause")
+        self.recent_pause_button.set_visible(self.marquee_animated)
+        for row_index, (scroll, track) in enumerate(self.recent_tracks):
+            self._clear_box(track)
+            row_items = items[row_index::2]
+            first = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+            for plugin in row_items:
+                first.append(RecentPluginCard(self, plugin))
+            track.set_spacing(12)
+            track.append(first)
+            if self.marquee_animated:
+                duplicate = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+                for plugin in row_items:
+                    duplicate.append(RecentPluginCard(self, plugin))
+                track.append(duplicate)
+            scroll.get_hadjustment().set_value(0)
+            if self.marquee_animated:
+                self.marquee_rows.append({
+                    "scroll": scroll,
+                    "first": first,
+                    "count": len(row_items),
+                    "direction": 1 if row_index == 0 else -1,
+                    "duration": max(30.0, len(row_items) * 5.0),
+                })
+        self.marquee_last_tick = time.monotonic()
+        if self.marquee_animated:
+            self.marquee_timer = GLib.timeout_add(16, self._animate_recent)
 
-    def _scroll_recent(self, _button, direction: int) -> None:
-        adjustment = self.recent_scroll.get_hadjustment()
+    def _populate_hidden_gems(self) -> None:
+        self._clear_box(self.gems_cards)
+        gems = highlighted_plugins(self.plugins, self.engagement, limit=9)
+        self.gems_section.set_visible(bool(gems))
+        for plugin, multiple in gems:
+            self.gems_cards.append(FeaturedPluginCard(self, plugin, multiple))
+
+    def _scroll_gems(self, _button, direction: int) -> None:
+        adjustment = self.gems_scroll.get_hadjustment()
         step = max(220, adjustment.get_page_size() * 0.75)
         target = adjustment.get_value() + direction * step
         maximum = max(0, adjustment.get_upper() - adjustment.get_page_size())
         adjustment.set_value(max(0, min(maximum, target)))
+
+    def _toggle_recent_motion(self, _button) -> None:
+        self.marquee_paused_by_user = not self.marquee_paused_by_user
+        self.recent_pause_button.set_label("Play" if self.marquee_paused_by_user else "Pause")
+
+    def _marquee_pointer_enter(self, _controller, _x, _y) -> None:
+        self.marquee_pointer_inside = True
+
+    def _marquee_pointer_leave(self, _controller) -> None:
+        self.marquee_pointer_inside = False
+
+    def _marquee_focus_enter(self, _controller) -> None:
+        self.marquee_focus_inside = True
+
+    def _marquee_focus_leave(self, _controller) -> None:
+        self.marquee_focus_inside = False
+
+    def _animate_recent(self) -> bool:
+        now = time.monotonic()
+        delta = min(0.1, max(0.0, now - self.marquee_last_tick))
+        self.marquee_last_tick = now
+        if self.marquee_paused_by_user or self.marquee_pointer_inside or self.marquee_focus_inside:
+            return GLib.SOURCE_CONTINUE
+        for row in self.marquee_rows:
+            adjustment = row["scroll"].get_hadjustment()
+            cycle = row["first"].get_width() + 12
+            maximum = adjustment.get_upper() - adjustment.get_page_size()
+            if cycle <= 0 or maximum < cycle:
+                continue
+            step = cycle / row["duration"] * delta * row["direction"]
+            value = adjustment.get_value() + step
+            if row["direction"] > 0 and value >= cycle:
+                value -= cycle
+            elif row["direction"] < 0 and value <= 0:
+                value += cycle
+            adjustment.set_value(max(0, min(maximum, value)))
+        return GLib.SOURCE_CONTINUE
 
     def _select_recent_plugin(self, _button, plugin: Plugin) -> None:
         self.filter_buttons["all"].set_active(True)
@@ -794,6 +987,9 @@ class StoreWindow(Adw.ApplicationWindow):
             self.theme_monitor.cancel()
         if self.theme_reload_source:
             GLib.source_remove(self.theme_reload_source)
+        if self.marquee_timer:
+            GLib.source_remove(self.marquee_timer)
+            self.marquee_timer = 0
         self.image_pool.shutdown(wait=False, cancel_futures=True)
         return False
 
@@ -884,7 +1080,8 @@ class StoreWindow(Adw.ApplicationWindow):
 
     def _update_refresh_button(self) -> None:
         self.refresh_button.set_sensitive(
-            not self.catalog_loading and not self.installed_loading and not self.busy
+            not self.catalog_loading and not self.installed_loading
+            and not self.engagement_loading and not self.busy
         )
 
     def _setup_card(self, _factory, list_item) -> None:
