@@ -6,6 +6,7 @@ from store_model import (
     CatalogError,
     MAX_CATALOG_BYTES,
     carousel_target,
+    feed_motion_offset,
     highlighted_plugins,
     enable_args,
     github_repository,
@@ -13,6 +14,9 @@ from store_model import (
     installed_map,
     normalize_catalog,
     marketplace_preview_url,
+    readable_contrast,
+    store_palette,
+    store_stylesheet,
     normalize_engagement,
     parse_catalog,
     recently_added,
@@ -134,6 +138,29 @@ class StoreModelTests(unittest.TestCase):
         self.assertEqual(carousel_target(650, 500, 1000, 1600, 1, wrap=True), 0)
         self.assertEqual(carousel_target(100, 500, 1000, 1600, -1, wrap=True), 600)
         self.assertEqual(carousel_target(100, 500, 0, 250, -1, wrap=False), 0)
+        self.assertEqual(feed_motion_offset(90, 100, 20), 10)
+        self.assertEqual(feed_motion_offset(0, 0, 12), 0)
+
+    def test_theme_stylesheet_uses_the_active_palette(self):
+        css = store_stylesheet({
+            "mode": "dark",
+            "accent": "#112233",
+            "background": "#445566",
+            "darker_background": "#010203",
+            "foreground": "#abcdee",
+            "bright_foreground": "#ddeeff",
+            "yellow": "#fedcba",
+            "selection": "#3a2e22; background: url(https://evil.example)",
+        })
+        self.assertIn("#112233", css)
+        self.assertIn("#010203", css)
+        self.assertIn("#abcdee", css)
+        self.assertIn("#fedcba", css)
+        self.assertNotIn("#ff5a36", css)
+        self.assertNotIn("evil.example", css)
+        self.assertEqual(store_palette({"accent": "#112233"})["accent"], "#112233")
+        self.assertEqual(readable_contrast("#c45c38"), "#f7edd8")
+        self.assertEqual(readable_contrast("#f7edd8"), "#14110e")
 
     def test_marketplace_install_commands_are_ignored(self):
         items, _ = normalize_catalog({"plugins": [plugin(

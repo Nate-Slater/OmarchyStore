@@ -45,6 +45,9 @@ from store_model import (
     recently_added,
     remove_args,
     search_plugins,
+    store_palette,
+    store_stylesheet,
+    feed_motion_offset,
 )
 
 
@@ -66,135 +69,19 @@ class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
 
 NO_REDIRECT_OPENER = urllib.request.build_opener(NoRedirectHandler())
 
-APP_CSS = """
-window.store-window, .store-root { background: #000; color: #d7d7d9; }
-headerbar.store-header { background: #0b0b0d; border-bottom: 1px solid #28282c; }
-.header-brand { font-family: monospace; font-size: 11px; font-weight: 700; letter-spacing: 1px; }
-.header-brand .brand-mark { color: #ff5a36; }
-.theme-pill { border: 1px solid #3a3a3f; border-radius: 4px; padding: 3px 7px; color: #ff5a36; font-family: monospace; font-size: 8px; font-weight: 700; }
-.store-content { background: #000; }
-scrolledwindow.page-scroll { background: #000; }
-.hero-panel { background: #0b0b0d; border: 1px solid #28282c; border-radius: 10px; padding: 22px 26px; }
-.eyebrow { color: #ff5a36; font-family: monospace; font-size: 10px; font-weight: 700; letter-spacing: 2px; }
-.hero-title { color: #eee; font-family: monospace; font-size: 30px; font-weight: 800; }
-.hero-copy { color: #aaaab0; font-size: 13px; }
-.hero-count { color: #eee; font-family: monospace; font-size: 27px; font-weight: 800; }
-.hero-count-caption { color: #aaaab0; font-family: monospace; font-size: 9px; letter-spacing: 1px; }
-.security-strip { background: #100c0b; border: 1px solid #40251f; border-radius: 6px; padding: 9px 12px; }
-.security-icon { color: #ff5a36; font-family: monospace; font-weight: 800; }
-.security-copy { color: #c4b8b5; font-size: 11px; }
-entry.search-entry { min-height: 42px; border: 1px solid #3a3a3f; border-radius: 6px; background: #0b0b0d; color: #eee; }
-entry.search-entry:focus-within { border-color: #ff5a36; box-shadow: 0 0 0 1px #ff5a36; }
-button.mode-button { min-height: 31px; padding: 0 13px; border: 1px solid #28282c; border-radius: 5px; background: #0b0b0d; color: #aaaab0; font-family: monospace; font-size: 10px; }
-button.mode-button:checked { border-color: #ff5a36; background: #ff5a36; color: #111; font-weight: 800; }
-dropdown.category-filter > button { min-height: 32px; border: 1px solid #28282c; border-radius: 5px; background: #0b0b0d; color: #d7d7d9; font-family: monospace; font-size: 10px; }
-.result-label { color: #7d7d84; font-family: monospace; font-size: 10px; letter-spacing: 1px; }
-.catalog-scroll, .detail-scroll { background: transparent; }
-gridview { background: transparent; }
-gridview > child { padding: 5px; }
-gridview > child:selected { background: transparent; }
-.plugin-card { min-height: 198px; background: #0b0b0d; border: 1px solid #28282c; border-radius: 8px; padding: 14px; }
-.plugin-card:hover { background: #101012; border-color: #4a4a50; }
-.plugin-card.selected { background: #111012; border-color: #ff5a36; }
-.plugin-mark { min-width: 42px; min-height: 42px; border: 1px solid #28282c; border-radius: 6px; background: #151416; font-family: monospace; font-size: 12px; font-weight: 800; }
-.preview-frame { min-height: 98px; border: 1px solid #28282c; border-radius: 6px; background: #101012; }
-.preview-placeholder { min-height: 98px; background: linear-gradient(135deg, #151416, #0b0b0d); }
-.preview-placeholder label { font-family: monospace; font-size: 24px; font-weight: 800; }
-.preview-image { min-height: 98px; }
-.recent-section { background: transparent; }
-.recent-heading { color: #aaaab0; font-family: monospace; font-size: 10px; font-weight: 800; letter-spacing: 1px; }
-.recent-summary { color: #7d7d84; font-family: monospace; font-size: 9px; }
-button.carousel-arrow { min-width: 30px; min-height: 28px; border: 1px solid #28282c; border-radius: 5px; background: #0b0b0d; color: #aaaab0; }
-button.carousel-arrow:hover { border-color: #ff5a36; color: #ff5a36; }
-button.recent-card { min-width: 218px; border: 1px solid #28282c; border-radius: 7px; background: #0b0b0d; padding: 8px; }
-button.recent-card:hover { border-color: #ff5a36; background: #101012; }
-button.recent-card label.recent-name { color: #eee; font-size: 11px; font-weight: 750; }
-button.recent-card label.recent-byline { color: #7d7d84; font-family: monospace; font-size: 8px; }
-.plugin-title { color: #eee; font-size: 14px; font-weight: 750; }
-.plugin-author { color: #7d7d84; font-family: monospace; font-size: 9px; }
-.plugin-description { color: #aaaab0; font-size: 11px; }
-.plugin-footer { color: #7d7d84; font-family: monospace; font-size: 9px; }
-.plugin-badge { border: 1px solid #39393f; border-radius: 4px; padding: 3px 6px; color: #aaaab0; font-family: monospace; font-size: 8px; font-weight: 700; }
-.plugin-badge.available { border-color: #553322; background: #21140e; color: #ff9b72; }
-.plugin-badge.installed { border-color: #43522c; background: #151b10; color: #b4c96f; }
-.details-panel { background: #0b0b0d; border: 1px solid #28282c; border-radius: 8px; padding: 19px; }
-.detail-mark { min-width: 54px; min-height: 54px; border: 1px solid #39393f; border-radius: 8px; background: #151416; font-family: monospace; font-size: 17px; font-weight: 800; }
-.detail-title { color: #eee; font-size: 22px; font-weight: 800; }
-.detail-meta { color: #aaaab0; font-family: monospace; font-size: 10px; }
-.detail-description { color: #d7d7d9; font-size: 13px; line-height: 1.5; }
-.detail-section-label { color: #7d7d84; font-family: monospace; font-size: 9px; font-weight: 700; letter-spacing: 1px; }
-.detail-info { color: #aaaab0; font-size: 11px; }
-.detail-warning { background: #100c0b; border-left: 2px solid #ff5a36; padding: 10px; color: #c4b8b5; font-size: 10px; }
-button.install-button { min-height: 36px; border: 1px solid #ff5a36; border-radius: 5px; background: #ff5a36; color: #111; font-family: monospace; font-size: 10px; font-weight: 800; }
-button.install-button:hover { background: #ff7655; }
-button.source-button { min-height: 34px; border: 1px solid #3a3a3f; border-radius: 5px; background: transparent; color: #d7d7d9; font-family: monospace; font-size: 10px; }
-button.source-button:hover { border-color: #ff5a36; color: #ff795c; }
-.empty-mark { color: #ff5a36; font-family: monospace; font-size: 34px; font-weight: 800; }
-.accent-lime { color: #b7ef51; } .accent-violet { color: #a78bfa; }
-.accent-amber { color: #f4bd62; } .accent-cyan { color: #68d6e8; }
-.accent-coral { color: #f18c75; } .accent-blue { color: #74a7f7; }
-.accent-mint { color: #69d4a7; } .accent-rose { color: #e896ba; }
-label.dim-label { color: #7d7d84; }
-button.flat.refresh-button { color: #aaaab0; }
-button.flat.refresh-button:hover { color: #ff5a36; background: #171719; }
-"""
-
-
-THEME_COLORS = {
-    "store_bg": "dark_background",
-    "store_panel": "background",
-    "store_panel_raised": "lighter_background",
-    "store_line": "selection",
-    "store_line_strong": "muted",
-    "store_fg": "foreground",
-    "store_heading": "bright_foreground",
-    "store_muted": "dark_foreground",
-    "store_faint": "muted",
-    "store_accent": "accent",
-    "store_accent_soft": "selection",
-    "store_warning": "yellow",
-    "store_stable": "green",
-    "store_danger": "red",
-}
 THEME_COLOR_HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
-CSS_COLOR_TOKENS = {
-    "#000": "store_bg", "#000000": "store_bg",
-    "#0b0b0d": "store_panel", "#101012": "store_panel_raised",
-    "#171719": "store_panel_raised",
-    "#111012": "store_panel_raised", "#151416": "store_panel_raised",
-    "#151b10": "store_panel_raised", "#28282c": "store_line",
-    "#39393f": "store_line_strong", "#3a3a3f": "store_line_strong",
-    "#4a4a50": "store_line_strong", "#d7d7d9": "store_fg",
-    "#eee": "store_heading", "#eeeeee": "store_heading",
-    "#aaaab0": "store_muted", "#c4b8b5": "store_muted",
-    "#7d7d84": "store_faint", "#ff5a36": "store_accent",
-    "#ff7655": "store_accent", "#ff795c": "store_accent",
-    "#40251f": "store_accent_soft", "#553322": "store_accent_soft",
-    "#21140e": "store_accent_soft", "#f4bd62": "store_warning",
-    "#b4c96f": "store_stable", "#43522c": "store_stable",
-    "#ff9b72": "store_accent", "#100c0b": "store_panel_raised",
-    "#111": "store_bg",
-}
-DEFAULT_THEME_COLORS = {
-    "mode": "dark",
-    "accent": "#ff5a36",
-    "selection": "#40251f",
-    "muted": "#7d7d84",
-    "background": "#0b0b0d",
-    "dark_background": "#000000",
-    "lighter_background": "#101012",
-    "foreground": "#d7d7d9",
-    "dark_foreground": "#aaaab0",
-    "bright_foreground": "#eeeeee",
-    "red": "#ff5a36",
-    "yellow": "#f4bd62",
-    "green": "#b4c96f",
-}
+THEME_KEYS = (
+    "mode", "accent", "selection", "muted", "background", "dark_background",
+    "darker_background", "lighter_background", "foreground", "dark_foreground",
+    "light_foreground", "bright_foreground", "red", "yellow", "orange", "green",
+    "cyan", "blue",
+)
+MAX_THEME_IMAGE_BYTES = 12 * 1024 * 1024
 
 
 def current_omarchy_theme() -> tuple[str, str, dict[str, str]]:
     state_dir = Path.home() / ".local/state/omarchy/current"
-    values = dict(DEFAULT_THEME_COLORS)
+    values: dict[str, str] = {}
     theme_id = "dark"
     try:
         candidate = (state_dir / "theme.name").read_text(encoding="utf-8")[:80].strip()
@@ -206,31 +93,44 @@ def current_omarchy_theme() -> tuple[str, str, dict[str, str]]:
         raw = (state_dir / "theme/colors.toml").read_bytes()
         if len(raw) <= 64 * 1024:
             parsed = tomllib.loads(raw.decode("utf-8"))
-            for key in values:
-                value = parsed.get(key)
-                if key == "mode":
-                    if isinstance(value, str) and value in {"dark", "light"}:
+            if isinstance(parsed, dict):
+                for key in THEME_KEYS:
+                    value = parsed.get(key)
+                    if key == "mode" and isinstance(value, str) and value in {"dark", "light"}:
                         values[key] = value
-                elif isinstance(value, str) and THEME_COLOR_HEX.fullmatch(value):
-                    values[key] = value.lower()
+                    elif isinstance(value, str) and THEME_COLOR_HEX.fullmatch(value):
+                        values[key] = value.lower()
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
         pass
-    palette = {token: values[color_name] for token, color_name in THEME_COLORS.items()}
     label = " ".join(word.capitalize() for word in theme_id.split("-"))
-    return theme_id, label, {"mode": values["mode"], **palette}
+    return theme_id, label, values
 
 
-def themed_app_css(colors: dict[str, str]) -> str:
-    definitions = "\n".join(
-        f"@define-color {name} {colors[name]};" for name in THEME_COLORS
-    )
-    color_pattern = re.compile(r"#[0-9a-fA-F]{3,8}\b")
-    css = color_pattern.sub(
-        lambda match: f"@{CSS_COLOR_TOKENS[match.group().lower()]}"
-        if match.group().lower() in CSS_COLOR_TOKENS else match.group(),
-        APP_CSS,
-    )
-    return definitions + "\n" + css
+def theme_background_file() -> Path | None:
+    """Return one local theme wallpaper, or None. Theme files are never executed."""
+    root = (Path.home() / ".local/state/omarchy/current/theme/backgrounds").resolve()
+    if not root.is_dir():
+        return None
+    candidates = []
+    try:
+        entries = list(root.iterdir())
+    except OSError:
+        return None
+    for path in entries:
+        try:
+            if path.is_symlink() or not path.is_file():
+                continue
+            resolved = path.resolve()
+            if not resolved.is_relative_to(root):
+                continue
+            if resolved.suffix.lower() not in {".jpg", ".jpeg", ".png", ".webp"}:
+                continue
+            if resolved.stat().st_size > MAX_THEME_IMAGE_BYTES:
+                continue
+        except OSError:
+            continue
+        candidates.append(resolved)
+    return sorted(candidates)[0] if candidates else None
 
 
 def install_app_css(colors: dict[str, str]):
@@ -238,9 +138,9 @@ def install_app_css(colors: dict[str, str]):
     if display is None:
         return None
     provider = Gtk.CssProvider()
-    provider.load_from_data(themed_app_css(colors).encode("utf-8"))
+    provider.load_from_data(store_stylesheet(colors).encode("utf-8"))
     Gtk.StyleContext.add_provider_for_display(
-        display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        display, provider, Gtk.STYLE_PROVIDER_PRIORITY_USER
     )
     return provider
 
@@ -497,6 +397,8 @@ class StoreWindow(Adw.ApplicationWindow):
         self.css_provider = application.css_provider
         self.theme_signature = (self.theme_id, tuple(sorted(self.theme_palette.items())))
         self.theme_watch_source = 0
+        self.marquee_user_enabled = False
+        self.set_title(f"Omarchy Store — {self.theme_name}")
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         root.add_css_class("store-root")
@@ -516,10 +418,30 @@ class StoreWindow(Adw.ApplicationWindow):
         brand_market.add_css_class("header-brand")
         brand.append(brand_market)
         header.set_title_widget(brand)
-        website_button = Gtk.Button(label="Browse web ↗")
+        self.discover_button = Gtk.ToggleButton(label="Discover")
+        self.discover_button.add_css_class("view-button")
+        self.browse_button = Gtk.ToggleButton(label="Browse")
+        self.browse_button.add_css_class("view-button")
+        self.browse_button.set_group(self.discover_button)
+        self.discover_button.connect("toggled", self._view_changed, "discover")
+        self.browse_button.connect("toggled", self._view_changed, "browse")
+        header.pack_start(self.discover_button)
+        header.pack_start(self.browse_button)
+        website_button = Gtk.Button(label="Web ↗")
         website_button.add_css_class("source-button")
         website_button.connect("clicked", self._open_marketplace)
         header.pack_start(website_button)
+        theme_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        theme_box.set_margin_end(8)
+        self.theme_caption = Gtk.Label(label=self.theme_name.upper())
+        self.theme_caption.add_css_class("theme-pill")
+        theme_box.append(self.theme_caption)
+        for swatch in ("accent", "brass", "sail", "water"):
+            chip = Gtk.Box()
+            chip.add_css_class("theme-swatch")
+            chip.add_css_class(f"swatch-{swatch}")
+            theme_box.append(chip)
+        header.pack_end(theme_box)
         refresh_button = Gtk.Button.new_from_icon_name("view-refresh-symbolic")
         refresh_button.add_css_class("flat")
         refresh_button.add_css_class("refresh-button")
@@ -529,23 +451,43 @@ class StoreWindow(Adw.ApplicationWindow):
         header.pack_end(refresh_button)
         root.append(header)
 
+        self.view_stack = Gtk.Stack()
+        self.view_stack.set_vexpand(True)
+        self.view_stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        self.view_stack.set_transition_duration(180)
+        root.append(self.view_stack)
+
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         content.add_css_class("store-content")
         content.set_margin_top(18)
         content.set_margin_bottom(16)
         content.set_margin_start(24)
         content.set_margin_end(24)
-        content.set_vexpand(True)
         self.page_scroll = Gtk.ScrolledWindow()
         self.page_scroll.add_css_class("page-scroll")
         self.page_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self.page_scroll.set_child(content)
         self.page_scroll.set_vexpand(True)
-        root.append(self.page_scroll)
+        self.view_stack.add_named(self.page_scroll, "discover")
 
+        self.hero_frame = Gtk.Overlay()
+        self.hero_frame.add_css_class("hero-panel")
+        self.hero_frame.set_margin_bottom(2)
+        self.hero_picture = Gtk.Picture()
+        self.hero_picture.set_content_fit(Gtk.ContentFit.COVER)
+        self.hero_picture.set_can_shrink(True)
+        self.hero_picture.set_size_request(1, 1)
+        self.hero_picture.set_hexpand(True)
+        self.hero_picture.set_vexpand(True)
+        self.hero_picture.add_css_class("hero-art")
+        self.hero_frame.set_child(self.hero_picture)
+        self.hero_frame.set_size_request(-1, 156)
+        self.hero_scrim = Gtk.Box()
+        self.hero_scrim.add_css_class("hero-scrim")
+        self.hero_scrim.set_can_target(False)
+        self.hero_frame.add_overlay(self.hero_scrim)
         hero = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=20)
-        hero.add_css_class("hero-panel")
-        hero.set_margin_bottom(2)
+        hero.add_css_class("hero-copy-box")
         hero_copy = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=7)
         hero_copy.set_hexpand(True)
         kicker = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -553,9 +495,10 @@ class StoreWindow(Adw.ApplicationWindow):
         eyebrow.set_xalign(0)
         eyebrow.add_css_class("eyebrow")
         kicker.append(eyebrow)
-        self.theme_caption = Gtk.Label(label=self.theme_name.upper())
-        self.theme_caption.add_css_class("theme-pill")
-        kicker.append(self.theme_caption)
+        hero_theme = Gtk.Label(label=self.theme_name.upper())
+        hero_theme.add_css_class("theme-pill")
+        kicker.append(hero_theme)
+        self.hero_theme = hero_theme
         hero_copy.append(kicker)
         hero_title = Gtk.Label(label="discover omarchy plugins")
         hero_title.set_xalign(0)
@@ -568,6 +511,11 @@ class StoreWindow(Adw.ApplicationWindow):
         hero_subtitle.set_wrap(True)
         hero_subtitle.add_css_class("hero-copy")
         hero_copy.append(hero_subtitle)
+        browse_plugins = Gtk.Button(label="Browse plugins")
+        browse_plugins.add_css_class("install-button")
+        browse_plugins.set_halign(Gtk.Align.START)
+        browse_plugins.connect("clicked", lambda *_args: self._show_view("browse"))
+        hero_copy.append(browse_plugins)
         hero.append(hero_copy)
 
         hero_count = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
@@ -580,7 +528,10 @@ class StoreWindow(Adw.ApplicationWindow):
         hero_count_caption.add_css_class("hero-count-caption")
         hero_count.append(hero_count_caption)
         hero.append(hero_count)
-        content.append(hero)
+        self.hero_frame.add_overlay(hero)
+        self.hero_frame.set_measure_overlay(hero, True)
+        self._apply_theme_art()
+        content.append(self.hero_frame)
 
         self.gems_section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.gems_section.add_css_class("recent-section")
@@ -589,6 +540,13 @@ class StoreWindow(Adw.ApplicationWindow):
         gems_title.set_xalign(0)
         gems_title.add_css_class("recent-heading")
         gems_header.append(gems_title)
+        self.gems_summary = Gtk.Label(label="VERIFIED · OFTEN COPIED · NOT AMONG THE MOST VIEWED")
+        self.gems_summary.set_xalign(0)
+        self.gems_summary.add_css_class("recent-summary")
+        gems_header.append(self.gems_summary)
+        gems_spacer = Gtk.Box()
+        gems_spacer.set_hexpand(True)
+        gems_header.append(gems_spacer)
         self.gems_back = Gtk.Button(label="‹")
         self.gems_back.add_css_class("carousel-arrow")
         self.gems_back.set_tooltip_text("Previous highlighted plugins")
@@ -599,19 +557,18 @@ class StoreWindow(Adw.ApplicationWindow):
         self.gems_forward.set_tooltip_text("Next highlighted plugins")
         self.gems_forward.connect("clicked", self._scroll_gems, 1)
         gems_header.append(self.gems_forward)
-        self.gems_summary = Gtk.Label(label="VERIFIED · OFTEN COPIED · NOT AMONG THE MOST VIEWED")
-        self.gems_summary.set_xalign(0)
-        self.gems_summary.add_css_class("recent-summary")
-        gems_header.append(self.gems_summary)
-        gems_spacer = Gtk.Box()
-        gems_spacer.set_hexpand(True)
-        gems_header.append(gems_spacer)
         self.gems_section.append(gems_header)
         self.gems_cards = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        self.gems_cards.set_halign(Gtk.Align.START)
         self.gems_scroll = Gtk.ScrolledWindow()
+        self.gems_scroll.add_css_class("feed-scroll")
         self.gems_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+        self.gems_scroll.set_overlay_scrolling(True)
+        self.gems_scroll.set_propagate_natural_width(False)
         self.gems_scroll.set_min_content_height(174)
         self.gems_scroll.set_child(self.gems_cards)
+        self.gems_scroll.get_hadjustment().connect("changed", self._sync_gems_nav)
+        self.gems_scroll.get_hadjustment().connect("value-changed", self._sync_gems_nav)
         self.gems_section.append(self.gems_scroll)
         self.gems_section.set_visible(False)
         content.append(self.gems_section)
@@ -623,21 +580,6 @@ class StoreWindow(Adw.ApplicationWindow):
         recent_title.set_xalign(0)
         recent_title.add_css_class("recent-heading")
         recent_header.append(recent_title)
-        self.recent_back = Gtk.Button(label="‹")
-        self.recent_back.add_css_class("carousel-arrow")
-        self.recent_back.set_tooltip_text("Previous newly added plugins")
-        self.recent_back.connect("clicked", self._scroll_recent, -1)
-        recent_header.append(self.recent_back)
-        self.recent_forward = Gtk.Button(label="›")
-        self.recent_forward.add_css_class("carousel-arrow")
-        self.recent_forward.set_tooltip_text("Next newly added plugins")
-        self.recent_forward.connect("clicked", self._scroll_recent, 1)
-        recent_header.append(self.recent_forward)
-        self.recent_pause_button = Gtk.Button(label="Play")
-        self.recent_pause_button.add_css_class("carousel-arrow")
-        self.recent_pause_button.set_tooltip_text("Pause or play the newly added feed")
-        self.recent_pause_button.connect("clicked", self._toggle_recent_motion)
-        recent_header.append(self.recent_pause_button)
         self.recent_summary = Gtk.Label(label="")
         self.recent_summary.set_xalign(0)
         self.recent_summary.add_css_class("recent-summary")
@@ -645,13 +587,33 @@ class StoreWindow(Adw.ApplicationWindow):
         recent_spacer = Gtk.Box()
         recent_spacer.set_hexpand(True)
         recent_header.append(recent_spacer)
+        self.recent_back = Gtk.Button(label="‹")
+        self.recent_back.add_css_class("carousel-arrow")
+        self.recent_back.set_tooltip_text("Previous newly added plugins")
+        self.recent_back.connect("clicked", self._scroll_recent, -1)
+        recent_header.append(self.recent_back)
+        self.recent_pause_button = Gtk.Button(label="Play")
+        self.recent_pause_button.add_css_class("carousel-arrow")
+        self.recent_pause_button.set_tooltip_text("Pause or play the newly added feed")
+        self.recent_pause_button.connect("clicked", self._toggle_recent_motion)
+        recent_header.append(self.recent_pause_button)
+        self.recent_forward = Gtk.Button(label="›")
+        self.recent_forward.add_css_class("carousel-arrow")
+        self.recent_forward.set_tooltip_text("Next newly added plugins")
+        self.recent_forward.connect("clicked", self._scroll_recent, 1)
+        recent_header.append(self.recent_forward)
         self.recent_section.append(recent_header)
         self.recent_tracks = []
         self.marquee_rows = []
         for row_index in range(2):
             track = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+            track.set_halign(Gtk.Align.START)
             scroll = Gtk.ScrolledWindow()
-            scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.NEVER)
+            scroll.add_css_class("feed-scroll")
+            scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+            scroll.set_overlay_scrolling(True)
+            scroll.set_kinetic_scrolling(False)
+            scroll.set_propagate_natural_width(False)
             scroll.set_min_content_height(166)
             scroll.set_child(track)
             self.recent_section.append(scroll)
@@ -686,8 +648,15 @@ class StoreWindow(Adw.ApplicationWindow):
         warning.append(warning_text)
         content.append(warning)
 
+        browse = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        browse.add_css_class("store-content")
+        browse.set_margin_top(14)
+        browse.set_margin_bottom(12)
+        browse.set_margin_start(24)
+        browse.set_margin_end(24)
+        self.view_stack.add_named(browse, "browse")
         controls = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=9)
-        content.append(controls)
+        browse.append(controls)
         self.search = Gtk.SearchEntry()
         self.search.set_placeholder_text("Search name, author, category, tag, or plugin ID")
         self.search.add_css_class("search-entry")
@@ -729,11 +698,10 @@ class StoreWindow(Adw.ApplicationWindow):
         self.status.set_ellipsize(Pango.EllipsizeMode.END)
         self.status.set_hexpand(True)
         self.status.add_css_class("result-label")
-        count_row.append(self.status)
         self.result_count = Gtk.Label(label="…")
         self.result_count.add_css_class("result-label")
         count_row.append(self.result_count)
-        content.append(count_row)
+        browse.append(count_row)
 
         self.store = Gio.ListStore.new(PluginItem)
         self.custom_filter = Gtk.CustomFilter.new(self._matches_filter)
@@ -777,8 +745,12 @@ class StoreWindow(Adw.ApplicationWindow):
         panes.set_shrink_start_child(False)
         panes.set_shrink_end_child(True)
         panes.set_vexpand(True)
-        panes.set_size_request(-1, 480)
-        content.append(panes)
+        browse.append(panes)
+        self.status_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        self.status_bar.add_css_class("status-bar")
+        self.status_bar.append(self.status)
+        root.append(self.status_bar)
+        self.discover_button.set_active(True)
 
         self.connect("close-request", self._on_close_request)
         self._watch_theme_changes()
@@ -849,7 +821,6 @@ class StoreWindow(Adw.ApplicationWindow):
             GLib.source_remove(self.marquee_timer)
         self.marquee_timer = 0
         self.marquee_rows = []
-        self.marquee_user_enabled = False
         self.recent_back.set_sensitive(False)
         self.recent_forward.set_sensitive(False)
         fresh = recently_added(self.plugins, hours=24)
@@ -863,12 +834,13 @@ class StoreWindow(Adw.ApplicationWindow):
             if fresh else f"NO NEW LISTINGS TODAY  ·  {len(week)} IN 7 DAYS"
         )
         items = carousel[:48]
+        can_animate = len(items) > 4
         self.marquee_animated = bool(
-            fresh and len(items) > 6 and (self.animations_enabled or self.marquee_user_enabled)
+            can_animate and (self.animations_enabled or self.marquee_user_enabled)
         )
         self.marquee_paused_by_user = False
         self.recent_pause_button.set_label("Pause" if self.marquee_animated else "Play")
-        self.recent_pause_button.set_visible(bool(fresh and len(items) > 6))
+        self.recent_pause_button.set_visible(can_animate)
         for row_index, (scroll, track) in enumerate(self.recent_tracks):
             self._clear_box(track)
             row_items = items[row_index::2]
@@ -888,7 +860,7 @@ class StoreWindow(Adw.ApplicationWindow):
                     "scroll": scroll,
                     "first": first,
                     "count": len(row_items),
-                    "direction": 1 if row_index == 0 else -1,
+                    "direction": 1,
                     "duration": max(30.0, len(row_items) * 5.0),
                 })
         self._update_recent_navigation()
@@ -902,6 +874,14 @@ class StoreWindow(Adw.ApplicationWindow):
         self.gems_section.set_visible(bool(gems))
         for plugin, multiple in gems:
             self.gems_cards.append(FeaturedPluginCard(self, plugin, multiple))
+        GLib.idle_add(self._sync_gems_nav)
+
+    def _sync_gems_nav(self, _adjustment=None) -> bool:
+        adjustment = self.gems_scroll.get_hadjustment()
+        maximum = max(0, adjustment.get_upper() - adjustment.get_page_size())
+        self.gems_back.set_sensitive(adjustment.get_value() > 1)
+        self.gems_forward.set_sensitive(adjustment.get_value() < maximum - 1)
+        return GLib.SOURCE_REMOVE
 
     def _scroll_gems(self, _button, direction: int) -> None:
         adjustment = self.gems_scroll.get_hadjustment()
@@ -909,6 +889,7 @@ class StoreWindow(Adw.ApplicationWindow):
         target = adjustment.get_value() + direction * step
         maximum = max(0, adjustment.get_upper() - adjustment.get_page_size())
         adjustment.set_value(max(0, min(maximum, target)))
+        self._sync_gems_nav()
 
     def _recent_adjustment_changed(self, _adjustment) -> None:
         self._update_recent_navigation()
@@ -965,22 +946,42 @@ class StoreWindow(Adw.ApplicationWindow):
         self.marquee_last_tick = now
         if self.marquee_paused_by_user or self.marquee_pointer_inside or self.marquee_focus_inside:
             return GLib.SOURCE_CONTINUE
-        for row in self.marquee_rows:
+        for index, row in enumerate(self.marquee_rows):
             adjustment = row["scroll"].get_hadjustment()
             cycle = row["first"].get_width() + 12
-            maximum = adjustment.get_upper() - adjustment.get_page_size()
-            if cycle <= 0 or maximum < cycle:
+            if cycle <= 12:
                 continue
-            step = cycle / row["duration"] * delta * row["direction"]
-            value = adjustment.get_value() + step
-            if row["direction"] > 0 and value >= cycle:
-                value -= cycle
-            elif row["direction"] < 0 and value <= 0:
-                value += cycle
-            adjustment.set_value(max(0, min(maximum, value)))
+            speed = 76.0 if index == 0 else 54.0
+            adjustment.set_value(feed_motion_offset(
+                adjustment.get_value(), cycle, speed * delta * row["direction"]
+            ))
         return GLib.SOURCE_CONTINUE
 
+    def _show_view(self, name: str) -> None:
+        button = self.discover_button if name == "discover" else self.browse_button
+        if not button.get_active():
+            button.set_active(True)
+        self.view_stack.set_visible_child_name(name)
+        if name == "browse":
+            self.search.grab_focus()
+
+    def _view_changed(self, button, name: str) -> None:
+        if button.get_active():
+            self.view_stack.set_visible_child_name(name)
+
+    def _apply_theme_art(self) -> None:
+        path = theme_background_file()
+        if path is None:
+            self.hero_picture.set_paintable(None)
+            self.hero_picture.set_visible(False)
+            self.hero_scrim.set_visible(False)
+            return
+        self.hero_picture.set_file(Gio.File.new_for_path(str(path)))
+        self.hero_picture.set_visible(True)
+        self.hero_scrim.set_visible(True)
+
     def _select_recent_plugin(self, _button, plugin: Plugin) -> None:
+        self._show_view("browse")
         self.filter_buttons["all"].set_active(True)
         self.filter_mode = "all"
         self.search.set_text("")
@@ -1071,18 +1072,21 @@ class StoreWindow(Adw.ApplicationWindow):
         theme_id, theme_name, palette = current_omarchy_theme()
         if self.css_provider is not None:
             try:
-                self.css_provider.load_from_data(themed_app_css(palette).encode("utf-8"))
+                self.css_provider.load_from_data(store_stylesheet(palette).encode("utf-8"))
             except GLib.Error as error:
                 self.status.set_text(f"Could not apply Omarchy theme: {error.message}")
                 return GLib.SOURCE_REMOVE
         Adw.StyleManager.get_default().set_color_scheme(
-            Adw.ColorScheme.FORCE_LIGHT if palette["mode"] == "light" else Adw.ColorScheme.FORCE_DARK
+            Adw.ColorScheme.FORCE_LIGHT if palette.get("mode") == "light" else Adw.ColorScheme.FORCE_DARK
         )
         self.theme_id = theme_id
         self.theme_name = theme_name
         self.theme_palette = palette
         self.theme_signature = (theme_id, tuple(sorted(palette.items())))
         self.theme_caption.set_text(theme_name.upper())
+        self.hero_theme.set_text(theme_name.upper())
+        self.set_title(f"Omarchy Store — {theme_name}")
+        self._apply_theme_art()
         return GLib.SOURCE_REMOVE
 
     def _installed_worker(self) -> None:
@@ -1477,7 +1481,7 @@ def main() -> int:
     Adw.init()
     theme = current_omarchy_theme()
     Adw.StyleManager.get_default().set_color_scheme(
-        Adw.ColorScheme.FORCE_LIGHT if theme[2]["mode"] == "light" else Adw.ColorScheme.FORCE_DARK
+        Adw.ColorScheme.FORCE_LIGHT if theme[2].get("mode") == "light" else Adw.ColorScheme.FORCE_DARK
     )
     app = StoreApplication()
     app.theme = theme
