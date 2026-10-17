@@ -20,6 +20,8 @@ _GITHUB_REPO = re.compile(
     r"(?:\.git)?/?$"
 )
 _CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_ACCENTS = {"lime", "violet", "amber", "cyan", "coral", "blue", "mint", "rose"}
+_INITIALS = re.compile(r"^[A-Z0-9]{1,3}$")
 
 
 @dataclass(frozen=True)
@@ -28,6 +30,8 @@ class Plugin:
     name: str
     description: str
     author: str
+    initials: str
+    accent: str
     version: str
     category: str
     kind: str
@@ -40,6 +44,7 @@ class Plugin:
     install_note: str
     upstream_status: str
     install_available: bool
+    stars: int
 
     @property
     def search_text(self) -> str:
@@ -95,6 +100,16 @@ def normalize_plugin(raw: Any) -> Plugin | None:
     ) if isinstance(raw_tags, list) else ()
     upstream_status = safe_text(raw.get("upstreamCheckStatus"), 40)
     layout = safe_text(raw.get("repositoryLayout"), 40)
+    initials = safe_text(raw.get("initials"), 3).upper()
+    if not _INITIALS.fullmatch(initials):
+        words = name.split()
+        initials = "".join(word[0] for word in words[:2]).upper() if len(words) > 1 else name[:2].upper()
+        initials = re.sub(r"[^A-Z0-9]", "", initials) or "OM"
+    accent = safe_text(raw.get("accent"), 20)
+    if accent not in _ACCENTS:
+        accent = "coral"
+    stars_value = raw.get("stars", 0)
+    stars = max(0, min(1_000_000_000, stars_value)) if isinstance(stars_value, int) and not isinstance(stars_value, bool) else 0
     install_available = (
         raw.get("installAvailable") is True
         and upstream_status != "failed"
@@ -106,6 +121,8 @@ def normalize_plugin(raw: Any) -> Plugin | None:
         name=name,
         description=safe_text(raw.get("description"), 1200),
         author=safe_text(raw.get("author"), 100) or "Unknown",
+        initials=initials,
+        accent=accent,
         version=safe_text(raw.get("version"), 64) or "Unknown",
         category=safe_text(raw.get("category"), 80) or "Other",
         kind=safe_text(raw.get("kind"), 80),
@@ -118,6 +135,7 @@ def normalize_plugin(raw: Any) -> Plugin | None:
         install_note=safe_text(raw.get("installNote"), 500),
         upstream_status=upstream_status,
         install_available=install_available,
+        stars=stars,
     )
 
 
