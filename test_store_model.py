@@ -6,6 +6,7 @@ from store_model import (
     CatalogError,
     MAX_CATALOG_BYTES,
     carousel_target,
+    catalog_page,
     feed_motion_offset,
     highlighted_plugins,
     enable_args,
@@ -140,6 +141,9 @@ class StoreModelTests(unittest.TestCase):
         self.assertEqual(carousel_target(100, 500, 0, 250, -1, wrap=False), 0)
         self.assertEqual(feed_motion_offset(90, 100, 20), 10)
         self.assertEqual(feed_motion_offset(0, 0, 12), 0)
+        self.assertEqual(catalog_page(0, 4, 6), (1, 1, 0, 0))
+        self.assertEqual(catalog_page(13, 0, 6), (1, 3, 0, 6))
+        self.assertEqual(catalog_page(13, 9, 6), (3, 3, 12, 13))
 
     def test_theme_stylesheet_uses_the_active_palette(self):
         css = store_stylesheet({

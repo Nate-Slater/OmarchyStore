@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
+import os
 import shutil
 import subprocess
 import sys
@@ -32,6 +33,7 @@ from store_model import (
     CatalogError,
     Plugin,
     carousel_target,
+    catalog_page,
     enable_args,
     github_repository,
     install_args,
@@ -58,6 +60,7 @@ SECURITY_NOTICE = (
     "and dependencies before installing."
 )
 MAX_PREVIEW_BYTES = 2 * 1024 * 1024
+PAGE_SIZE = 4
 MAX_CACHED_PREVIEWS = 40
 ENGAGEMENT_URL = "https://api.omarchyplugins.com/v1/stats"
 
@@ -236,7 +239,7 @@ class PluginCard(Gtk.Box):
         self.description.set_xalign(0)
         self.description.set_yalign(0)
         self.description.set_wrap(True)
-        self.description.set_lines(3)
+        self.description.set_lines(2)
         self.description.set_ellipsize(Pango.EllipsizeMode.END)
         self.description.add_css_class("plugin-description")
         self.set_vexpand(False)
@@ -648,23 +651,69 @@ class StoreWindow(Adw.ApplicationWindow):
         warning.append(warning_text)
         content.append(warning)
 
-        browse = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        browse = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         browse.add_css_class("store-content")
-        browse.set_margin_top(14)
+        browse.set_margin_top(16)
         browse.set_margin_bottom(12)
         browse.set_margin_start(24)
         browse.set_margin_end(24)
         self.view_stack.add_named(browse, "browse")
-        controls = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=9)
-        browse.append(controls)
+        self.page = 1
+        self.page_count = 1
+        self.visible_count = 0
+        self._suspend_filter = False
+
+        masthead = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
+        masthead.add_css_class("browse-masthead")
+        masthead_copy = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        masthead_copy.set_hexpand(True)
+        masthead_kicker = Gtk.Label(label="REGISTRY")
+        masthead_kicker.set_xalign(0)
+        masthead_kicker.add_css_class("eyebrow")
+        masthead_copy.append(masthead_kicker)
+        masthead_title = Gtk.Label(label="browse all plugins")
+        masthead_title.set_xalign(0)
+        masthead_title.add_css_class("browse-title")
+        masthead_copy.append(masthead_title)
+        masthead.append(masthead_copy)
+        count_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        count_box.set_valign(Gtk.Align.END)
+        self.result_count = Gtk.Label(label="—")
+        self.result_count.set_xalign(1)
+        self.result_count.add_css_class("browse-count")
+        count_box.append(self.result_count)
+        self.result_caption = Gtk.Label(label="MATCHING PLUGINS")
+        self.result_caption.set_xalign(1)
+        self.result_caption.add_css_class("hero-count-caption")
+        count_box.append(self.result_caption)
+        masthead.append(count_box)
+        browse.append(masthead)
+
+        deck = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        deck.add_css_class("control-deck")
+        browse.append(deck)
+        search_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        deck.append(search_row)
         self.search = Gtk.SearchEntry()
         self.search.set_placeholder_text("Search name, author, category, tag, or plugin ID")
         self.search.add_css_class("search-entry")
+        self.search.set_hexpand(True)
         self.search.connect("search-changed", self._filter_changed)
-        controls.append(self.search)
+        search_row.append(self.search)
+        search_hint = Gtk.Label(label="Ctrl K")
+        search_hint.add_css_class("kbd-hint")
+        search_hint.set_valign(Gtk.Align.CENTER)
+        search_row.append(search_hint)
+        self.sort_filter = Gtk.DropDown.new_from_strings([
+            "Featured", "Recently added", "A–Z", "Most starred", "Verified first"
+        ])
+        self.sort_filter.add_css_class("category-filter")
+        self.sort_filter.set_tooltip_text("Sort plugin listings")
+        self.sort_filter.connect("notify::selected", self._sort_changed)
+        search_row.append(self.sort_filter)
 
         filter_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        controls.append(filter_row)
+        deck.append(filter_row)
         self.filter_buttons: dict[str, Gtk.ToggleButton] = {}
         for index, (mode, label) in enumerate((
             ("all", "All"), ("installable", "Installable"), ("installed", "Installed")
@@ -676,32 +725,25 @@ class StoreWindow(Adw.ApplicationWindow):
             button.connect("toggled", self._filter_mode_changed, mode)
             filter_row.append(button)
             self.filter_buttons[mode] = button
-
-        spacer = Gtk.Box()
-        spacer.set_hexpand(True)
-        filter_row.append(spacer)
         self.category_filter = Gtk.DropDown.new_from_strings(["All categories"])
         self.category_filter.add_css_class("category-filter")
+        self.category_filter.set_tooltip_text("Filter by category")
         self.category_filter.connect("notify::selected", self._category_changed)
         filter_row.append(self.category_filter)
-        self.sort_filter = Gtk.DropDown.new_from_strings([
-            "Featured", "Recently added", "A–Z", "Most starred", "Verified first"
-        ])
-        self.sort_filter.add_css_class("category-filter")
-        self.sort_filter.set_tooltip_text("Sort plugin listings")
-        self.sort_filter.connect("notify::selected", self._sort_changed)
-        filter_row.append(self.sort_filter)
+        filter_spacer = Gtk.Box()
+        filter_spacer.set_hexpand(True)
+        filter_row.append(filter_spacer)
+        self.reset_button = Gtk.Button(label="Reset")
+        self.reset_button.add_css_class("source-button")
+        self.reset_button.set_tooltip_text("Clear search and filters")
+        self.reset_button.connect("clicked", self._reset_filters)
+        filter_row.append(self.reset_button)
 
-        count_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         self.status = Gtk.Label(label="Loading marketplace and installed plugins…")
         self.status.set_xalign(0)
         self.status.set_ellipsize(Pango.EllipsizeMode.END)
         self.status.set_hexpand(True)
         self.status.add_css_class("result-label")
-        self.result_count = Gtk.Label(label="…")
-        self.result_count.add_css_class("result-label")
-        count_row.append(self.result_count)
-        browse.append(count_row)
 
         self.store = Gio.ListStore.new(PluginItem)
         self.custom_filter = Gtk.CustomFilter.new(self._matches_filter)
@@ -709,21 +751,83 @@ class StoreWindow(Adw.ApplicationWindow):
         self.selection = Gtk.SingleSelection.new(self.filtered_store)
         self.selection.set_autoselect(True)
         self.selection.connect("notify::selected-item", self._selection_changed)
-        self.filter_buttons["all"].set_active(True)
 
         factory = Gtk.SignalListItemFactory()
         factory.connect("setup", self._setup_card)
         factory.connect("bind", self._bind_card)
         self.grid_view = Gtk.GridView.new(self.selection, factory)
         self.grid_view.set_min_columns(1)
-        self.grid_view.set_max_columns(3)
+        self.grid_view.set_max_columns(2)
         self.grid_view.set_single_click_activate(False)
+        self.grid_view.set_vexpand(True)
 
         list_scroll = Gtk.ScrolledWindow()
         list_scroll.add_css_class("catalog-scroll")
         list_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        list_scroll.set_min_content_width(510)
+        list_scroll.set_min_content_width(420)
+        list_scroll.set_vexpand(True)
         list_scroll.set_child(self.grid_view)
+        self.list_scroll = list_scroll
+
+        self.empty_state = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self.empty_state.add_css_class("empty-state")
+        self.empty_state.set_valign(Gtk.Align.CENTER)
+        self.empty_state.set_visible(False)
+        empty_title = Gtk.Label(label="No plugins match")
+        empty_title.set_xalign(0)
+        empty_title.add_css_class("detail-title")
+        self.empty_state.append(empty_title)
+        empty_copy = Gtk.Label(label="Try another name, tag, or author, or clear the current filters.")
+        empty_copy.set_xalign(0)
+        empty_copy.set_wrap(True)
+        empty_copy.add_css_class("detail-info")
+        self.empty_state.append(empty_copy)
+        empty_reset = Gtk.Button(label="Clear filters")
+        empty_reset.add_css_class("install-button")
+        empty_reset.set_halign(Gtk.Align.START)
+        empty_reset.connect("clicked", self._reset_filters)
+        self.empty_state.append(empty_reset)
+
+        catalog_stack = Gtk.Stack()
+        catalog_stack.set_vexpand(True)
+        catalog_stack.add_named(list_scroll, "results")
+        catalog_stack.add_named(self.empty_state, "empty")
+        self.catalog_stack = catalog_stack
+
+        pager = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        pager.add_css_class("pager-bar")
+        pager.set_halign(Gtk.Align.CENTER)
+        self.page_first = Gtk.Button(label="First")
+        self.page_back = Gtk.Button(label="Previous")
+        self.page_forward = Gtk.Button(label="Next")
+        self.page_last = Gtk.Button(label="Last")
+        for button, step in (
+            (self.page_first, "first"), (self.page_back, "previous"),
+            (self.page_forward, "next"), (self.page_last, "last"),
+        ):
+            button.add_css_class("source-button")
+            button.connect("clicked", self._change_page, step)
+        self.page_entry = Gtk.Entry()
+        self.page_entry.set_width_chars(4)
+        self.page_entry.set_max_length(5)
+        self.page_entry.set_alignment(0.5)
+        self.page_entry.set_hexpand(False)
+        self.page_entry.set_size_request(58, -1)
+        self.page_entry.add_css_class("pager-entry")
+        self.page_entry.set_tooltip_text("Page number, then Enter")
+        self.page_entry.connect("activate", self._jump_page)
+        self.page_total = Gtk.Label(label="of 1")
+        self.page_total.add_css_class("result-label")
+        pager.append(self.page_first)
+        pager.append(self.page_back)
+        pager.append(self.page_entry)
+        pager.append(self.page_total)
+        pager.append(self.page_forward)
+        pager.append(self.page_last)
+
+        list_column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        list_column.append(catalog_stack)
+        list_column.append(pager)
 
         self.details = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
         self.details.add_css_class("details-panel")
@@ -735,22 +839,29 @@ class StoreWindow(Adw.ApplicationWindow):
         detail_scroll.add_css_class("detail-scroll")
         detail_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         detail_scroll.set_child(self.details)
+        detail_scroll.set_size_request(380, -1)
 
         panes = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
         panes.set_wide_handle(True)
-        panes.set_start_child(list_scroll)
+        panes.set_start_child(list_column)
         panes.set_end_child(detail_scroll)
-        panes.set_position(820)
-        panes.set_resize_start_child(False)
-        panes.set_shrink_start_child(False)
-        panes.set_shrink_end_child(True)
+        panes.set_resize_start_child(True)
+        panes.set_shrink_start_child(True)
+        panes.set_shrink_end_child(False)
         panes.set_vexpand(True)
         browse.append(panes)
+        keys = Gtk.EventControllerKey.new()
+        keys.connect("key-pressed", self._on_key_pressed)
+        self.add_controller(keys)
+        self.filter_buttons["all"].set_active(True)
         self.status_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         self.status_bar.add_css_class("status-bar")
         self.status_bar.append(self.status)
         root.append(self.status_bar)
-        self.discover_button.set_active(True)
+        if os.environ.get("OMARCHY_STORE_VIEW") == "browse":
+            self.browse_button.set_active(True)
+        else:
+            self.discover_button.set_active(True)
 
         self.connect("close-request", self._on_close_request)
         self._watch_theme_changes()
@@ -982,19 +1093,17 @@ class StoreWindow(Adw.ApplicationWindow):
 
     def _select_recent_plugin(self, _button, plugin: Plugin) -> None:
         self._show_view("browse")
+        self._suspend_filter = True
         self.filter_buttons["all"].set_active(True)
         self.filter_mode = "all"
         self.search.set_text("")
         self.category_filter.set_selected(0)
         self.category = ""
-        self.custom_filter.changed(Gtk.FilterChange.DIFFERENT)
-        self._update_result_count()
-        for position in range(self.filtered_store.get_n_items()):
-            item = self.filtered_store.get_item(position)
-            if item.plugin.id == plugin.id:
-                self.selection.set_selected(position)
-                self.grid_view.scroll_to(position, Gtk.ListScrollFlags.FOCUS)
-                break
+        self._suspend_filter = False
+        visible = self._visible_plugins()
+        index = next((position for position, item in enumerate(visible) if item.id == plugin.id), 0)
+        self.page = index // PAGE_SIZE + 1
+        self._rebuild_store(select_id=plugin.id)
 
     def request_preview(self, url: str, preview: PreviewArt, generation: int) -> None:
         if not url or marketplace_preview_url(urllib.parse.urlsplit(url).path.lstrip("/")) != url:
@@ -1120,23 +1229,92 @@ class StoreWindow(Adw.ApplicationWindow):
         self.filter_buttons["installed"].set_sensitive(self.installed_ready)
         return GLib.SOURCE_REMOVE
 
-    def _rebuild_store(self) -> None:
-        selected = self.selection.get_selected_item()
-        selected_id = selected.plugin.id if selected else ""
-        self.store.splice(0, self.store.get_n_items(), [PluginItem(p) for p in self._ordered_plugins()])
-        self.custom_filter.changed(Gtk.FilterChange.DIFFERENT)
-        if selected_id:
-            for position in range(self.filtered_store.get_n_items()):
-                item = self.filtered_store.get_item(position)
-                if item.plugin.id == selected_id:
-                    self.selection.set_selected(position)
-                    break
-        self._selection_changed(self.selection, None)
+    def _visible_plugins(self) -> list[Plugin]:
+        ordered = self._ordered_plugins()
+        if self.category:
+            ordered = [plugin for plugin in ordered if plugin.category == self.category]
+        return search_plugins(ordered, self.search.get_text(), self.installed, self.filter_mode)
+
+    def _rebuild_store(self, select_id: str = "") -> None:
+        if not select_id:
+            selected = self.selection.get_selected_item()
+            select_id = selected.plugin.id if selected else ""
+        visible = self._visible_plugins()
+        self.visible_count = len(visible)
+        page, pages, start, end = catalog_page(len(visible), self.page, PAGE_SIZE)
+        self.page = page
+        self.page_count = pages
+        page_items = visible[start:end]
+        self.store.splice(0, self.store.get_n_items(), [PluginItem(plugin) for plugin in page_items])
+        chosen = next((position for position, plugin in enumerate(page_items) if plugin.id == select_id), 0)
+        if page_items:
+            self.selection.set_selected(chosen)
+            self.grid_view.scroll_to(chosen, Gtk.ListScrollFlags.NONE)
+            self._selection_changed(self.selection, None)
+        else:
+            self._show_plugin(None)
+        self.catalog_stack.set_visible_child_name("results" if page_items else "empty")
+        self._update_pager()
         self._update_result_count()
 
     def _update_result_count(self) -> None:
-        total = self.filtered_store.get_n_items() if hasattr(self, "filtered_store") else 0
-        self.result_count.set_text(f"SHOWING {total:,} / {len(self.plugins):,}")
+        matched = self.visible_count
+        total = len(self.plugins)
+        self.result_count.set_text(f"{matched:,}")
+        self.result_caption.set_text("MATCHING" if matched != total else "COMMUNITY PLUGINS")
+        filtering = bool(self.search.get_text() or self.category or self.filter_mode != "all")
+        self.reset_button.set_sensitive(filtering)
+
+    def _update_pager(self) -> None:
+        self.page_entry.set_text(str(self.page))
+        self.page_total.set_text(f"of {self.page_count:,}")
+        self.page_first.set_sensitive(self.page > 1)
+        self.page_back.set_sensitive(self.page > 1)
+        self.page_forward.set_sensitive(self.page < self.page_count)
+        self.page_last.set_sensitive(self.page < self.page_count)
+
+    def _change_page(self, _button, step: str) -> None:
+        if step == "first":
+            self.page = 1
+        elif step == "previous":
+            self.page -= 1
+        elif step == "next":
+            self.page += 1
+        else:
+            self.page = self.page_count
+        self._rebuild_store()
+        self.list_scroll.get_vadjustment().set_value(0)
+
+    def _jump_page(self, entry) -> None:
+        text = entry.get_text().strip()
+        if text.isdigit():
+            self.page = int(text)
+            self._rebuild_store()
+            self.list_scroll.get_vadjustment().set_value(0)
+        else:
+            self._update_pager()
+
+    def _reset_filters(self, *_args) -> None:
+        self._suspend_filter = True
+        self.filter_mode = "all"
+        self.category = ""
+        self.page = 1
+        self.filter_buttons["all"].set_active(True)
+        self.category_filter.set_selected(0)
+        self.search.set_text("")
+        self._suspend_filter = False
+        self._rebuild_store()
+
+    def _on_key_pressed(self, _controller, keyval, _keycode, state) -> bool:
+        control = bool(state & Gdk.ModifierType.CONTROL_MASK)
+        if control and keyval in (Gdk.KEY_k, Gdk.KEY_K, Gdk.KEY_f, Gdk.KEY_F):
+            self._show_view("browse")
+            self.search.grab_focus()
+            return True
+        if keyval == Gdk.KEY_Escape and self.search.has_focus() and self.search.get_text():
+            self.search.set_text("")
+            return True
+        return False
 
     def _ordered_plugins(self) -> list[Plugin]:
         if self.sort_mode == "recent":
@@ -1158,7 +1336,9 @@ class StoreWindow(Adw.ApplicationWindow):
         if mode == self.sort_mode:
             return
         self.sort_mode = mode
-        self._rebuild_store()
+        self.page = 1
+        if hasattr(self, "catalog_stack"):
+            self._rebuild_store()
 
     def _update_refresh_button(self) -> None:
         self.refresh_button.set_sensitive(
@@ -1187,32 +1367,29 @@ class StoreWindow(Adw.ApplicationWindow):
             card.set_selected(list_item.get_selected())
 
     def _matches_filter(self, item) -> bool:
-        if item is None:
-            return False
-        if self.category and item.plugin.category != self.category:
-            return False
-        return bool(search_plugins(
-            [item.plugin], self.search.get_text(), self.installed, self.filter_mode
-        ))
+        return item is not None
 
     def _filter_changed(self, _entry) -> None:
-        self.custom_filter.changed(Gtk.FilterChange.DIFFERENT)
-        self._update_result_count()
+        if self._suspend_filter:
+            return
+        self.page = 1
+        self._rebuild_store()
 
     def _filter_mode_changed(self, button, mode: str) -> None:
-        if not button.get_active():
+        if not button.get_active() or self._suspend_filter:
             return
         self.filter_mode = mode
-        self.custom_filter.changed(Gtk.FilterChange.DIFFERENT)
-        self._update_result_count()
+        self.page = 1
+        self._rebuild_store()
 
     def _category_changed(self, dropdown, _pspec) -> None:
         selected = dropdown.get_selected_item()
         value = selected.get_string() if selected else "All categories"
         self.category = "" if value == "All categories" else value
-        if hasattr(self, "custom_filter"):
-            self.custom_filter.changed(Gtk.FilterChange.DIFFERENT)
-            self._update_result_count()
+        if self._suspend_filter or not hasattr(self, "store"):
+            return
+        self.page = 1
+        self._rebuild_store()
 
     def _selection_changed(self, _selection, _parameter) -> None:
         selected = self.selection.get_selected_item()
@@ -1235,119 +1412,149 @@ class StoreWindow(Adw.ApplicationWindow):
             label.add_css_class(css_class)
         return label
 
+    def _fact(self, label: str, value: str) -> Gtk.Box:
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        caption = Gtk.Label(label=label)
+        caption.set_xalign(0)
+        caption.add_css_class("fact-label")
+        text = Gtk.Label(label=value)
+        text.set_xalign(0)
+        text.set_wrap(True)
+        text.set_selectable(True)
+        text.add_css_class("fact-value")
+        box.append(caption)
+        box.append(text)
+        return box
+
     def _show_plugin(self, plugin: Plugin | None) -> None:
         self._clear_box(self.details)
         if plugin is None:
-            mark = self._label("OM", "empty-mark")
-            mark.set_halign(Gtk.Align.START)
-            self.details.append(mark)
-            self.details.append(self._label("Pick a plugin", "detail-title"))
+            self.details.append(self._label("Choose a plugin", "detail-title"))
             self.details.append(self._label(
-                "Select a marketplace card to see its details, compatibility, and install options.",
+                "Select a card to see its artwork, compatibility, and install options.",
                 "detail-info",
             ))
             return
 
-        self.details.append(self._label("PLUGIN DETAILS", "eyebrow"))
-        title_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        mark = self._label(plugin.initials, "detail-mark")
-        mark.add_css_class(f"accent-{plugin.accent}")
-        title_row.append(mark)
-        title_column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        title_column.set_hexpand(True)
-        title = self._label(plugin.name, "detail-title")
-        title_column.append(title)
-        author = self._label(f"BY {plugin.author.upper()}", "plugin-author")
-        title_column.append(author)
-        title_row.append(title_column)
-        self.details.append(title_row)
+        artwork = PreviewArt(176)
+        self.details.append(artwork)
+        artwork.load(plugin, self.request_preview)
 
-        subhead = self._label(
-            f"{plugin.category.upper()}  ·  {plugin.kind.upper() or 'PLUGIN'}  ·  {plugin.version}",
-            "detail-meta",
-        )
-        self.details.append(subhead)
-        self.details.append(self._label(
-            plugin.description or "No description was provided.", "detail-description"
-        ))
-
-        self.details.append(self._label("LISTING", "detail-section-label"))
-        metadata = (
-            f"ID       {plugin.id}\n"
-            f"LICENSE  {plugin.license}\n"
-            f"TAGS     {', '.join(plugin.tags) if plugin.tags else 'None'}"
-        )
-        self.details.append(self._label(metadata, "detail-info"))
-
-        if plugin.verification_status == "verified":
-            verification = (
-                "Marketplace status: verified listing. Verification applies to a "
-                "listed snapshot; the current upstream install may differ."
-            )
-            if plugin.verification_coverage == "update-unverified":
-                verification += " Current upstream changes are unverified."
-        else:
-            verification = (
-                "Marketplace status: unverified. No current verification record "
-                "is available for the listed snapshot."
-            )
-        if plugin.upstream_status == "failed":
-            verification += " Compatibility checks failed; automatic installation is disabled."
+        badges = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        badges.set_margin_top(4)
+        verified = plugin.verification_status == "verified"
         verification_badge = self._label(
-            "VERIFIED SNAPSHOT" if plugin.verification_status == "verified" else "UNVERIFIED LISTING",
+            "VERIFIED SNAPSHOT" if verified else "UNVERIFIED",
             "plugin-badge",
         )
-        verification_badge.add_css_class(
-            "installed" if plugin.verification_status == "verified" else "available"
-        )
-        self.details.append(verification_badge)
-        self.details.append(self._label(verification, "detail-warning"))
-
-        action_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        source = Gtk.Button(label="View source ↗")
-        source.add_css_class("source-button")
-        source.connect("clicked", self._open_source, plugin)
-        action_row.append(source)
-
+        verification_badge.add_css_class("installed" if verified else "available")
+        badges.append(verification_badge)
         installed = self.installed.get(plugin.id) if self.installed_ready else None
         if installed is not None:
-            state_text = "Installed and enabled" if installed["enabled"] else "Installed but disabled"
-            self.details.append(self._label(state_text.upper(), "plugin-badge"))
+            state = self._label(
+                "INSTALLED" if installed["enabled"] else "DISABLED",
+                "plugin-badge",
+            )
+            state.add_css_class("installed" if installed["enabled"] else "available")
+            badges.append(state)
+        elif plugin.install_available:
+            badges.append(self._label("READY TO INSTALL", "plugin-badge"))
+        self.details.append(badges)
+
+        self.details.append(self._label(plugin.name, "detail-title"))
+        self.details.append(self._label(
+            f"{plugin.author}  ·  {plugin.category}",
+            "detail-meta",
+        ))
+        self.details.append(self._label(
+            plugin.description or "No description was provided.",
+            "detail-description",
+        ))
+
+        primary = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         if not self.installed_ready:
-            pass
+            primary.append(self._label("Installed state unavailable", "detail-info"))
         elif installed is None and plugin.install_available:
             install = Gtk.Button(label="Install & enable")
             install.add_css_class("install-button")
+            install.set_hexpand(True)
             install.set_sensitive(not self.busy)
             install.connect("clicked", self._ask_to_install, plugin)
-            action_row.append(install)
+            primary.append(install)
         elif installed is not None and not installed["enabled"] and not installed["firstParty"]:
-            enable = Gtk.Button(label="Enable (runs code)")
+            enable = Gtk.Button(label="Enable")
             enable.add_css_class("install-button")
+            enable.set_hexpand(True)
             enable.set_sensitive(not self.busy)
             enable.connect("clicked", self._ask_to_enable, plugin)
-            action_row.append(enable)
+            primary.append(enable)
+        elif installed is not None and installed["firstParty"]:
+            primary.append(self._label("Included with Omarchy", "detail-info"))
+        elif not plugin.install_available and installed is None:
+            primary.append(self._label(
+                plugin.install_note or "Automatic installation is unavailable for this repository layout.",
+                "detail-info",
+            ))
 
+        secondary = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        source = Gtk.Button(label="View source")
+        source.add_css_class("source-button")
+        source.set_hexpand(True)
+        source.connect("clicked", self._open_source, plugin)
+        secondary.append(source)
         if installed is not None and not installed["firstParty"]:
             remove = Gtk.Button(label="Remove")
             remove.add_css_class("source-button")
             remove.set_sensitive(not self.busy)
             remove.connect("clicked", self._ask_to_remove, plugin)
-            action_row.append(remove)
-        elif installed is not None:
-            action_row.append(self._label("Included with Omarchy", "detail-info"))
-        elif not self.installed_ready:
-            action_row.append(self._label("Installed state unavailable", "detail-info"))
-        elif not plugin.install_available:
-            action_row.append(self._label(
-                plugin.install_note or "Automatic installation is unavailable for this repository layout.",
-                "detail-info",
-            ))
-        self.details.append(action_row)
+            secondary.append(remove)
+        primary.append(secondary)
+        self.details.append(primary)
 
-        self.details.append(self._label(
-            "REPOSITORY  " + plugin.repo_url.removesuffix(".git"), "detail-meta"
-        ))
+        self.details.append(self._label("DETAILS", "detail-section-label"))
+        facts = Gtk.Grid()
+        facts.set_column_spacing(18)
+        facts.set_row_spacing(12)
+        facts.set_column_homogeneous(True)
+        fact_values = (
+            ("CATEGORY", plugin.category),
+            ("KIND", plugin.kind or "Plugin"),
+            ("VERSION", plugin.version),
+            ("STARS", f"{plugin.stars:,}" if plugin.stars else "—"),
+            ("LICENSE", plugin.license),
+            ("ADDED", listing_age(plugin)),
+            ("ID", plugin.id),
+            ("LAYOUT", "Installable" if plugin.install_available else "Source only"),
+        )
+        for index, (label, value) in enumerate(fact_values):
+            facts.attach(self._fact(label, value), index % 2, index // 2, 1, 1)
+        self.details.append(facts)
+
+        if plugin.tags:
+            self.details.append(self._label("TAGS", "detail-section-label"))
+            tags = Gtk.FlowBox()
+            tags.set_selection_mode(Gtk.SelectionMode.NONE)
+            tags.set_max_children_per_line(6)
+            tags.set_column_spacing(6)
+            tags.set_row_spacing(6)
+            for tag in plugin.tags[:12]:
+                chip = Gtk.Label(label=tag)
+                chip.add_css_class("tag-chip")
+                tags.append(chip)
+            self.details.append(tags)
+
+        if verified:
+            verification = (
+                "Verification applies to a listed snapshot. Omarchy installs the "
+                "repository's current GitHub HEAD, which may differ."
+            )
+            if plugin.verification_coverage == "update-unverified":
+                verification += " Current upstream changes are unverified."
+        else:
+            verification = "No current verification record is available for the listed snapshot."
+        if plugin.upstream_status == "failed":
+            verification += " Compatibility checks failed, so automatic installation is disabled."
+        self.details.append(self._label(verification, "detail-warning"))
 
     def _open_marketplace(self, _button) -> None:
         try:

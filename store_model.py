@@ -328,6 +328,16 @@ def carousel_target(
     return max(0.0, min(maximum, target))
 
 
+def catalog_page(total: int, page: int, page_size: int = 6) -> tuple[int, int, int, int]:
+    """Return the current page, page count, and half-open slice for a catalog page."""
+    size = max(1, int(page_size))
+    count = max(0, int(total))
+    pages = max(1, (count + size - 1) // size)
+    current = min(max(1, int(page)), pages)
+    start = (current - 1) * size
+    return current, pages, start, min(count, start + size)
+
+
 def feed_motion_offset(value: float, cycle: float, step: float) -> float:
     """Advance a duplicated marquee and wrap inside one copy of the track."""
     if cycle <= 0:
@@ -472,7 +482,18 @@ gridview > child:selected {{ background: transparent; }}
 .plugin-badge {{ border: 1px solid {line_strong}; border-radius: 4px; padding: 3px 6px; color: {muted}; font-family: monospace; font-size: 8px; font-weight: 700; }}
 .plugin-badge.available {{ border-color: {brass}; background: {panel}; color: {brass}; }}
 .plugin-badge.installed {{ border-color: {stable}; background: {panel}; color: {stable}; }}
-.details-panel {{ background: {panel}; border: 1px solid {line}; border-radius: 8px; padding: 19px; }}
+.browse-masthead {{ padding: 2px 2px 8px; }}
+.browse-title {{ color: {heading}; font-family: monospace; font-size: 28px; font-weight: 800; }}
+.browse-count {{ color: {heading}; font-family: monospace; font-size: 22px; font-weight: 800; }}
+.control-deck {{ background: {panel}; border: 1px solid {line}; border-top: 2px solid {brass}; border-radius: 8px; padding: 10px; }}
+.kbd-hint {{ border: 1px solid {line_strong}; border-radius: 4px; padding: 2px 6px; color: {faint}; font-family: monospace; font-size: 9px; }}
+.pager-bar {{ border-top: 1px solid {line}; padding-top: 8px; }}
+.pager-entry {{ min-width: 52px; min-height: 32px; }}
+.fact-label {{ color: {brass}; font-family: monospace; font-size: 8px; font-weight: 700; letter-spacing: 1px; }}
+.fact-value {{ color: {heading}; font-size: 12px; }}
+.tag-chip {{ border: 1px solid {line}; border-radius: 99px; padding: 3px 8px; color: {fg}; font-family: monospace; font-size: 9px; }}
+.empty-state {{ padding: 36px 20px; }}
+.details-panel {{ background: {panel}; border: 1px solid {line}; border-radius: 8px; padding: 16px; }}
 .detail-mark {{ min-width: 54px; min-height: 54px; border-radius: 8px; font-size: 17px; }}
 .detail-title {{ font-size: 22px; font-weight: 800; }}
 .detail-meta {{ font-family: monospace; font-size: 10px; }}
