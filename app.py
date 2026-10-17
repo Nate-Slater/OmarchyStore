@@ -589,13 +589,6 @@ class StoreWindow(Adw.ApplicationWindow):
         gems_title.set_xalign(0)
         gems_title.add_css_class("recent-heading")
         gems_header.append(gems_title)
-        self.gems_summary = Gtk.Label(label="VERIFIED · OFTEN COPIED · NOT AMONG THE MOST VIEWED")
-        self.gems_summary.set_xalign(0)
-        self.gems_summary.add_css_class("recent-summary")
-        gems_header.append(self.gems_summary)
-        gems_spacer = Gtk.Box()
-        gems_spacer.set_hexpand(True)
-        gems_header.append(gems_spacer)
         self.gems_back = Gtk.Button(label="‹")
         self.gems_back.add_css_class("carousel-arrow")
         self.gems_back.set_tooltip_text("Previous highlighted plugins")
@@ -606,6 +599,13 @@ class StoreWindow(Adw.ApplicationWindow):
         self.gems_forward.set_tooltip_text("Next highlighted plugins")
         self.gems_forward.connect("clicked", self._scroll_gems, 1)
         gems_header.append(self.gems_forward)
+        self.gems_summary = Gtk.Label(label="VERIFIED · OFTEN COPIED · NOT AMONG THE MOST VIEWED")
+        self.gems_summary.set_xalign(0)
+        self.gems_summary.add_css_class("recent-summary")
+        gems_header.append(self.gems_summary)
+        gems_spacer = Gtk.Box()
+        gems_spacer.set_hexpand(True)
+        gems_header.append(gems_spacer)
         self.gems_section.append(gems_header)
         self.gems_cards = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         self.gems_scroll = Gtk.ScrolledWindow()
@@ -623,13 +623,6 @@ class StoreWindow(Adw.ApplicationWindow):
         recent_title.set_xalign(0)
         recent_title.add_css_class("recent-heading")
         recent_header.append(recent_title)
-        self.recent_summary = Gtk.Label(label="")
-        self.recent_summary.set_xalign(0)
-        self.recent_summary.add_css_class("recent-summary")
-        recent_header.append(self.recent_summary)
-        recent_spacer = Gtk.Box()
-        recent_spacer.set_hexpand(True)
-        recent_header.append(recent_spacer)
         self.recent_back = Gtk.Button(label="‹")
         self.recent_back.add_css_class("carousel-arrow")
         self.recent_back.set_tooltip_text("Previous newly added plugins")
@@ -640,12 +633,18 @@ class StoreWindow(Adw.ApplicationWindow):
         self.recent_forward.set_tooltip_text("Next newly added plugins")
         self.recent_forward.connect("clicked", self._scroll_recent, 1)
         recent_header.append(self.recent_forward)
-        self.recent_pause_button = Gtk.Button(label="Pause")
+        self.recent_pause_button = Gtk.Button(label="Play")
         self.recent_pause_button.add_css_class("carousel-arrow")
-        self.recent_pause_button.set_tooltip_text("Pause the newly added feed")
+        self.recent_pause_button.set_tooltip_text("Pause or play the newly added feed")
         self.recent_pause_button.connect("clicked", self._toggle_recent_motion)
-        self.recent_pause_button.set_visible(False)
         recent_header.append(self.recent_pause_button)
+        self.recent_summary = Gtk.Label(label="")
+        self.recent_summary.set_xalign(0)
+        self.recent_summary.add_css_class("recent-summary")
+        recent_header.append(self.recent_summary)
+        recent_spacer = Gtk.Box()
+        recent_spacer.set_hexpand(True)
+        recent_header.append(recent_spacer)
         self.recent_section.append(recent_header)
         self.recent_tracks = []
         self.marquee_rows = []
@@ -850,6 +849,7 @@ class StoreWindow(Adw.ApplicationWindow):
             GLib.source_remove(self.marquee_timer)
         self.marquee_timer = 0
         self.marquee_rows = []
+        self.marquee_user_enabled = False
         self.recent_back.set_sensitive(False)
         self.recent_forward.set_sensitive(False)
         fresh = recently_added(self.plugins, hours=24)
@@ -863,10 +863,12 @@ class StoreWindow(Adw.ApplicationWindow):
             if fresh else f"NO NEW LISTINGS TODAY  ·  {len(week)} IN 7 DAYS"
         )
         items = carousel[:48]
-        self.marquee_animated = bool(fresh and len(items) > 6 and self.animations_enabled)
+        self.marquee_animated = bool(
+            fresh and len(items) > 6 and (self.animations_enabled or self.marquee_user_enabled)
+        )
         self.marquee_paused_by_user = False
-        self.recent_pause_button.set_label("Pause")
-        self.recent_pause_button.set_visible(self.marquee_animated)
+        self.recent_pause_button.set_label("Pause" if self.marquee_animated else "Play")
+        self.recent_pause_button.set_visible(bool(fresh and len(items) > 6))
         for row_index, (scroll, track) in enumerate(self.recent_tracks):
             self._clear_box(track)
             row_items = items[row_index::2]
@@ -938,6 +940,10 @@ class StoreWindow(Adw.ApplicationWindow):
             adjustment.set_value(target)
 
     def _toggle_recent_motion(self, _button) -> None:
+        if not self.marquee_animated:
+            self.marquee_user_enabled = True
+            self._populate_recent()
+            return
         self.marquee_paused_by_user = not self.marquee_paused_by_user
         self.recent_pause_button.set_label("Play" if self.marquee_paused_by_user else "Pause")
 
